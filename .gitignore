@@ -1,18 +1,33 @@
+# Gradle & Build Outputs
+.gradle/
+.kotlin/
+build/
+/build/
+app/build/
+/app/build/
+.build-outputs/
+release-artifacts/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Android Studio / IntelliJ IDEA
 *.iml
-.gradle
-.kotlin
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+.idea/
 .DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+
+# Local Environment & Secrets (NEVER commit secrets or keys)
 local.properties
+/local.properties
 .env
+*.env
+!.env.example
+google-services.json
+
+# Signing Keystores (NEVER commit signing keys)
+*.keystore
+*.keystore.base64
+*.jks
 debug.keystore
+debug.keystore.base64
+my-upload-key.jks
