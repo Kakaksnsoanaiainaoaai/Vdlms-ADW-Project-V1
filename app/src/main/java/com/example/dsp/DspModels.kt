@@ -21,12 +21,6 @@ enum class CrossoverSlope(val dbPerOct: Int, val label: String) {
     DB_48(48, "48 dB/oct")
 }
 
-enum class OutputSource(val label: String) {
-    IN_L("IN L"),
-    IN_R("IN R"),
-    SUM_LR("L+R SUM")
-}
-
 enum class CrossoverBand(val label: String) {
     LOW("LOW"),
     HIGH("HIGH"),
@@ -46,22 +40,6 @@ data class EqBandConfig(
         frequencyHz = frequencyHz.coerceIn(20f, 20000f),
         gainDb = ((gainDb.coerceIn(-15f, 15f)) * 10f).roundToInt() / 10f,
         q = ((q.coerceIn(0.3f, 16.0f)) * 10f).roundToInt() / 10f
-    )
-}
-
-@JsonClass(generateAdapter = true)
-data class InputChannelConfig(
-    val gainDb: Float = 0f,
-    val polarityInverted: Boolean = false,
-    val muted: Boolean = false,
-    val delayMs: Float = 0f,
-    val eqBypass: Boolean = false,
-    val eqBands: List<EqBandConfig> = defaultEqBands()
-) {
-    fun validated(): InputChannelConfig = copy(
-        gainDb = ((gainDb.coerceIn(-24f, 12f)) * 10f).roundToInt() / 10f,
-        delayMs = ((delayMs.coerceIn(0f, 50f)) * 100f).roundToInt() / 100f,
-        eqBands = (if (eqBands.size == 5) eqBands else defaultEqBands()).map { it.validated() }
     )
 }
 
@@ -123,47 +101,48 @@ data class LimiterConfig(
     )
 }
 
+/**
+ * Completely independent per-channel DSP chain configuration.
+ * Channel L and Channel R each own their own separate instance of this class:
+ * INPUT -> INPUT GAIN -> 5-BAND EQ -> DELAY -> XOVER (LOW/HIGH/FULL) -> OUTPUT GAIN -> LIMITER -> MUTE -> OUTPUT.
+ */
 @JsonClass(generateAdapter = true)
-data class OutputChannelConfig(
-    val source: OutputSource = OutputSource.IN_L,
-    val band: CrossoverBand = CrossoverBand.LOW,
-    val gainDb: Float = 0f,
-    val delayMs: Float = 0f,
-    val polarityInverted: Boolean = false,
-    val muted: Boolean = false,
+data class ChannelDspConfig(
+    val inputGainDb: Float = 0f,
+    val inputPolarityInverted: Boolean = false,
     val eqBypass: Boolean = false,
     val eqBands: List<EqBandConfig> = defaultEqBands(),
-    val limiter: LimiterConfig = LimiterConfig()
+    val delayMs: Float = 0f,
+    val crossover: CrossoverConfig = CrossoverConfig(),
+    val activeBand: CrossoverBand = CrossoverBand.LOW,
+    val limiter: LimiterConfig = LimiterConfig(),
+    val outputGainDb: Float = 0f,
+    val outputPolarityInverted: Boolean = false,
+    val muted: Boolean = false
 ) {
-    fun validated(): OutputChannelConfig = copy(
-        gainDb = ((gainDb.coerceIn(-24f, 12f)) * 10f).roundToInt() / 10f,
-        delayMs = ((delayMs.coerceIn(0f, 50f)) * 100f).roundToInt() / 100f,
+    fun validated(): ChannelDspConfig = copy(
+        inputGainDb = ((inputGainDb.coerceIn(-24f, 12f)) * 10f).roundToInt() / 10f,
         eqBands = (if (eqBands.size == 5) eqBands else defaultEqBands()).map { it.validated() },
-        limiter = limiter.validated()
+        delayMs = ((delayMs.coerceIn(0f, 50f)) * 100f).roundToInt() / 100f,
+        crossover = crossover.validated(),
+        limiter = limiter.validated(),
+        outputGainDb = ((outputGainDb.coerceIn(-24f, 12f)) * 10f).roundToInt() / 10f
     )
 }
 
+/**
+ * Top-level DSP configuration containing two strictly separated channel chains:
+ * channelL and channelR. No shared EQ, Crossover, Delay, Gain, Limiter, or Mute exists.
+ */
 @JsonClass(generateAdapter = true)
 data class DspState(
     val dspEnabled: Boolean = true,
-    val inputL: InputChannelConfig = InputChannelConfig(),
-    val inputR: InputChannelConfig = InputChannelConfig(),
-    val crossover: CrossoverConfig = CrossoverConfig(),
-    val outputL: OutputChannelConfig = OutputChannelConfig(
-        source = OutputSource.IN_L,
-        band = CrossoverBand.LOW
-    ),
-    val outputR: OutputChannelConfig = OutputChannelConfig(
-        source = OutputSource.IN_R,
-        band = CrossoverBand.HIGH
-    )
+    val channelL: ChannelDspConfig = ChannelDspConfig(activeBand = CrossoverBand.LOW),
+    val channelR: ChannelDspConfig = ChannelDspConfig(activeBand = CrossoverBand.HIGH)
 ) {
     fun validated(): DspState = copy(
-        inputL = inputL.validated(),
-        inputR = inputR.validated(),
-        crossover = crossover.validated(),
-        outputL = outputL.validated(),
-        outputR = outputR.validated()
+        channelL = channelL.validated(),
+        channelR = channelR.validated()
     )
 
     companion object {

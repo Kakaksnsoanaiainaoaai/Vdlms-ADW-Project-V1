@@ -9,9 +9,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.DlmsApplication
 import com.example.audio.AudioEngineState
+import com.example.audio.AudioEngineStatus
 import com.example.audio.AudioHardwareCapabilities
 import com.example.audio.AudioSourceType
 import com.example.dsp.AudioTelemetry
+import com.example.dsp.ChannelDspConfig
 import com.example.dsp.CrossoverBand
 import com.example.dsp.CrossoverBandConfig
 import com.example.dsp.CrossoverFilterType
@@ -19,16 +21,12 @@ import com.example.dsp.CrossoverSlope
 import com.example.dsp.DspState
 import com.example.dsp.EqBandConfig
 import com.example.dsp.EqFilterType
-import com.example.dsp.InputChannelConfig
 import com.example.dsp.LimiterConfig
-import com.example.dsp.OutputChannelConfig
-import com.example.dsp.OutputSource
+import com.example.hardware.ChannelDspSubTab
 import com.example.hardware.DisplayPage
 import com.example.hardware.EqParamField
 import com.example.hardware.HardwareKey
 import com.example.hardware.HardwareUiState
-import com.example.hardware.InputSubTab
-import com.example.hardware.OutputSubTab
 import com.example.hardware.mainMenuEntries
 import com.example.storage.DisplayTimeoutOption
 import com.example.storage.DlmsPreset
@@ -50,6 +48,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 class DlmsViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as DlmsApplication
@@ -149,10 +148,10 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
             settingsStore.updateAudioSource(source)
         }
         audioEngine.selectSource(source)
-        if (source == AudioSourceType.YOUTUBE) {
-            _statusBannerMessage.value = "YOUTUBE AUDIO ROUTING: NOT AVAILABLE"
+        _statusBannerMessage.value = if (source == AudioSourceType.YOUTUBE) {
+            "YOUTUBE AUDIO ROUTING: NOT AVAILABLE"
         } else {
-            _statusBannerMessage.value = "SOURCE: ${source.displayName}"
+            "SOURCE: ${source.displayName}"
         }
     }
 
@@ -217,15 +216,17 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- Hardware Front-Panel Navigation & Encoder ---
 
-    fun navigateTo(page: DisplayPage) {
+    fun navigateTo(page: DisplayPage, subTab: ChannelDspSubTab? = null) {
         registerInteraction()
         _hardwareState.update { hw ->
+            val resolvedTab = subTab ?: hw.channelSubTab
             if (hw.currentPage == page) {
-                hw.copy(isEditingParam = false)
+                hw.copy(channelSubTab = resolvedTab, isEditingParam = false)
             } else {
                 hw.copy(
                     currentPage = page,
                     backStack = (hw.backStack + hw.currentPage).takeLast(12),
+                    channelSubTab = resolvedTab,
                     focusIndex = 0,
                     isEditingParam = false
                 )
@@ -268,11 +269,11 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
             }
             HardwareKey.BACK -> navigateBack()
             HardwareKey.QUICK_SOURCE -> navigateTo(DisplayPage.AUDIO_SOURCE)
-            HardwareKey.QUICK_IN_L -> navigateTo(DisplayPage.INPUT_L)
-            HardwareKey.QUICK_IN_R -> navigateTo(DisplayPage.INPUT_R)
+            HardwareKey.QUICK_IN_L -> navigateTo(DisplayPage.CHANNEL_L, ChannelDspSubTab.MAIN)
+            HardwareKey.QUICK_IN_R -> navigateTo(DisplayPage.CHANNEL_R, ChannelDspSubTab.MAIN)
             HardwareKey.QUICK_XOVER -> navigateTo(DisplayPage.CROSSOVER)
-            HardwareKey.QUICK_OUT_L -> navigateTo(DisplayPage.OUTPUT_L)
-            HardwareKey.QUICK_OUT_R -> navigateTo(DisplayPage.OUTPUT_R)
+            HardwareKey.QUICK_OUT_L -> navigateTo(DisplayPage.CHANNEL_L, ChannelDspSubTab.LIMITER)
+            HardwareKey.QUICK_OUT_R -> navigateTo(DisplayPage.CHANNEL_R, ChannelDspSubTab.LIMITER)
             HardwareKey.QUICK_MEDIA -> navigateTo(DisplayPage.MEDIA_YOUTUBE)
             HardwareKey.MUTE -> handleHardwareMuteKey()
             HardwareKey.ENTER -> handleHardwareEnterKey()
@@ -306,19 +307,23 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
         onHardwareKey(HardwareKey.ENTER)
     }
 
-    fun setInputSubTab(tab: InputSubTab) {
+    fun setChannelSubTab(tab: ChannelDspSubTab) {
         registerInteraction()
-        _hardwareState.update { it.copy(inputSubTab = tab, focusIndex = 0, isEditingParam = false) }
+        _hardwareState.update { it.copy(channelSubTab = tab, focusIndex = 0, isEditingParam = false) }
     }
 
-    fun setOutputSubTab(tab: OutputSubTab) {
+    fun setCrossoverChannelTab(channelIdx: Int) {
         registerInteraction()
-        _hardwareState.update { it.copy(outputSubTab = tab, focusIndex = 0, isEditingParam = false) }
+        _hardwareState.update {
+            it.copy(crossoverChannelTab = channelIdx.coerceIn(0, 1), focusIndex = 0, isEditingParam = false)
+        }
     }
 
     fun setCrossoverBandTab(bandIndex: Int) {
         registerInteraction()
-        _hardwareState.update { it.copy(crossoverBandTab = bandIndex.coerceIn(0, 1), focusIndex = 0, isEditingParam = false) }
+        _hardwareState.update {
+            it.copy(crossoverBandTab = bandIndex.coerceIn(0, 1), focusIndex = 0, isEditingParam = false)
+        }
     }
 
     fun selectAndEditParameter(focusIndex: Int, enterEdit: Boolean = true) {
@@ -338,16 +343,14 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun handleHardwareMuteKey() {
         when (_hardwareState.value.currentPage) {
-            DisplayPage.INPUT_L -> updateInputL { it.copy(muted = !it.muted) }
-            DisplayPage.INPUT_R -> updateInputR { it.copy(muted = !it.muted) }
-            DisplayPage.OUTPUT_L -> updateOutputL { it.copy(muted = !it.muted) }
-            DisplayPage.OUTPUT_R -> updateOutputR { it.copy(muted = !it.muted) }
+            DisplayPage.CHANNEL_L -> updateChannelL { it.copy(muted = !it.muted) }
+            DisplayPage.CHANNEL_R -> updateChannelR { it.copy(muted = !it.muted) }
             else -> {
-                val bothMuted = _dspState.value.outputL.muted && _dspState.value.outputR.muted
+                val bothMuted = _dspState.value.channelL.muted && _dspState.value.channelR.muted
                 updateDsp {
                     it.copy(
-                        outputL = it.outputL.copy(muted = !bothMuted),
-                        outputR = it.outputR.copy(muted = !bothMuted)
+                        channelL = it.channelL.copy(muted = !bothMuted),
+                        channelR = it.channelR.copy(muted = !bothMuted)
                     )
                 }
             }
@@ -361,58 +364,45 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
                 val entry = mainMenuEntries.getOrNull(hw.menuIndex) ?: return
                 navigateTo(entry.targetPage)
             }
-            DisplayPage.INPUT_L, DisplayPage.INPUT_R -> {
-                if (hw.inputSubTab == InputSubTab.MAIN) {
-                    when (hw.focusIndex) {
-                        1 -> {
-                            if (hw.currentPage == DisplayPage.INPUT_L) updateInputL { it.copy(polarityInverted = !it.polarityInverted) }
-                            else updateInputR { it.copy(polarityInverted = !it.polarityInverted) }
-                        }
-                        2 -> {
-                            if (hw.currentPage == DisplayPage.INPUT_L) updateInputL { it.copy(muted = !it.muted) }
-                            else updateInputR { it.copy(muted = !it.muted) }
-                        }
+            DisplayPage.CHANNEL_L, DisplayPage.CHANNEL_R -> {
+                val isLeft = hw.currentPage == DisplayPage.CHANNEL_L
+                when (hw.channelSubTab) {
+                    ChannelDspSubTab.MAIN -> when (hw.focusIndex) {
+                        1 -> updateChannel(isLeft) { it.copy(inputPolarityInverted = !it.inputPolarityInverted) }
+                        4 -> updateChannel(isLeft) { it.copy(muted = !it.muted) }
                         else -> _hardwareState.update { it.copy(isEditingParam = !it.isEditingParam) }
                     }
-                } else {
-                    if (hw.eqParamField == EqParamField.ENABLED) {
-                        val isLeft = hw.currentPage == DisplayPage.INPUT_L
-                        toggleInputEqBand(isLeft, hw.selectedEqBand)
-                    } else {
-                        _hardwareState.update { it.copy(isEditingParam = !it.isEditingParam) }
+                    ChannelDspSubTab.EQ -> {
+                        if (hw.eqParamField == EqParamField.ENABLED) {
+                            toggleChannelEqBand(isLeft, hw.selectedEqBand)
+                        } else {
+                            _hardwareState.update { it.copy(isEditingParam = !it.isEditingParam) }
+                        }
+                    }
+                    ChannelDspSubTab.XOVER -> {
+                        if (hw.focusIndex == 3) {
+                            val isLow = hw.crossoverBandTab == 0
+                            updateChannelCrossoverBand(isLeft, isLow) { it.copy(bypass = !it.bypass) }
+                        } else {
+                            _hardwareState.update { it.copy(isEditingParam = !it.isEditingParam) }
+                        }
+                    }
+                    ChannelDspSubTab.LIMITER -> {
+                        if (hw.focusIndex == 0) {
+                            updateChannelLimiter(isLeft) { it.copy(enabled = !it.enabled) }
+                        } else {
+                            _hardwareState.update { it.copy(isEditingParam = !it.isEditingParam) }
+                        }
                     }
                 }
             }
             DisplayPage.CROSSOVER -> {
+                val isLeft = hw.crossoverChannelTab == 0
                 if (hw.focusIndex == 3) {
                     val isLow = hw.crossoverBandTab == 0
-                    updateCrossoverBand(isLow) { it.copy(bypass = !it.bypass) }
+                    updateChannelCrossoverBand(isLeft, isLow) { it.copy(bypass = !it.bypass) }
                 } else {
                     _hardwareState.update { it.copy(isEditingParam = !it.isEditingParam) }
-                }
-            }
-            DisplayPage.OUTPUT_L, DisplayPage.OUTPUT_R -> {
-                val isLeft = hw.currentPage == DisplayPage.OUTPUT_L
-                when (hw.outputSubTab) {
-                    OutputSubTab.MAIN -> when (hw.focusIndex) {
-                        4 -> updateOutput(isLeft) { it.copy(polarityInverted = !it.polarityInverted) }
-                        5 -> updateOutput(isLeft) { it.copy(muted = !it.muted) }
-                        else -> _hardwareState.update { it.copy(isEditingParam = !it.isEditingParam) }
-                    }
-                    OutputSubTab.EQ -> {
-                        if (hw.eqParamField == EqParamField.ENABLED) {
-                            toggleOutputEqBand(isLeft, hw.selectedEqBand)
-                        } else {
-                            _hardwareState.update { it.copy(isEditingParam = !it.isEditingParam) }
-                        }
-                    }
-                    OutputSubTab.LIMITER -> {
-                        if (hw.focusIndex == 0) {
-                            updateOutput(isLeft) { it.copy(limiter = it.limiter.copy(enabled = !it.limiter.enabled)) }
-                        } else {
-                            _hardwareState.update { it.copy(isEditingParam = !it.isEditingParam) }
-                        }
-                    }
                 }
             }
             DisplayPage.HOME -> navigateTo(DisplayPage.MENU)
@@ -437,15 +427,17 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
     private fun handleDirectionalHorizontal(delta: Int) {
         val hw = _hardwareState.value
         when (hw.currentPage) {
-            DisplayPage.INPUT_L, DisplayPage.INPUT_R -> {
-                if (hw.inputSubTab == InputSubTab.EQ && hw.isEditingParam) {
+            DisplayPage.CHANNEL_L, DisplayPage.CHANNEL_R -> {
+                if (hw.channelSubTab == ChannelDspSubTab.EQ && hw.isEditingParam) {
                     val fields = EqParamField.entries
                     val nextIdx = (fields.indexOf(hw.eqParamField) + delta).coerceIn(0, fields.lastIndex)
                     _hardwareState.update { it.copy(eqParamField = fields[nextIdx]) }
+                } else if (hw.channelSubTab == ChannelDspSubTab.XOVER && hw.isEditingParam) {
+                    adjustFocusedParameter(delta)
                 } else {
-                    val tabs = InputSubTab.entries
-                    val nextTab = (tabs.indexOf(hw.inputSubTab) + delta).coerceIn(0, tabs.lastIndex)
-                    setInputSubTab(tabs[nextTab])
+                    val tabs = ChannelDspSubTab.entries
+                    val nextTab = (tabs.indexOf(hw.channelSubTab) + delta).coerceIn(0, tabs.lastIndex)
+                    setChannelSubTab(tabs[nextTab])
                 }
             }
             DisplayPage.CROSSOVER -> {
@@ -455,17 +447,6 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
                     adjustFocusedParameter(delta)
                 }
             }
-            DisplayPage.OUTPUT_L, DisplayPage.OUTPUT_R -> {
-                if (hw.outputSubTab == OutputSubTab.EQ && hw.isEditingParam) {
-                    val fields = EqParamField.entries
-                    val nextIdx = (fields.indexOf(hw.eqParamField) + delta).coerceIn(0, fields.lastIndex)
-                    _hardwareState.update { it.copy(eqParamField = fields[nextIdx]) }
-                } else {
-                    val tabs = OutputSubTab.entries
-                    val nextTab = (tabs.indexOf(hw.outputSubTab) + delta).coerceIn(0, tabs.lastIndex)
-                    setOutputSubTab(tabs[nextTab])
-                }
-            }
             else -> {}
         }
     }
@@ -473,20 +454,19 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
     private fun moveFocus(delta: Int) {
         val hw = _hardwareState.value
         val maxIndex = when (hw.currentPage) {
-            DisplayPage.INPUT_L, DisplayPage.INPUT_R ->
-                if (hw.inputSubTab == InputSubTab.MAIN) 3 else 4
-            DisplayPage.CROSSOVER -> 3
-            DisplayPage.OUTPUT_L, DisplayPage.OUTPUT_R -> when (hw.outputSubTab) {
-                OutputSubTab.MAIN -> 5
-                OutputSubTab.EQ -> 4
-                OutputSubTab.LIMITER -> 4
+            DisplayPage.CHANNEL_L, DisplayPage.CHANNEL_R -> when (hw.channelSubTab) {
+                ChannelDspSubTab.MAIN -> 4
+                ChannelDspSubTab.EQ -> 4
+                ChannelDspSubTab.XOVER -> 3
+                ChannelDspSubTab.LIMITER -> 4
             }
+            DisplayPage.CROSSOVER -> 3
             else -> 0
         }
         val next = (hw.focusIndex + delta).coerceIn(0, maxIndex)
-        if ((hw.currentPage == DisplayPage.INPUT_L || hw.currentPage == DisplayPage.INPUT_R) && hw.inputSubTab == InputSubTab.EQ) {
-            _hardwareState.update { it.copy(focusIndex = next, selectedEqBand = next) }
-        } else if ((hw.currentPage == DisplayPage.OUTPUT_L || hw.currentPage == DisplayPage.OUTPUT_R) && hw.outputSubTab == OutputSubTab.EQ) {
+        if ((hw.currentPage == DisplayPage.CHANNEL_L || hw.currentPage == DisplayPage.CHANNEL_R) &&
+            hw.channelSubTab == ChannelDspSubTab.EQ
+        ) {
             _hardwareState.update { it.copy(focusIndex = next, selectedEqBand = next) }
         } else {
             _hardwareState.update { it.copy(focusIndex = next) }
@@ -496,49 +476,55 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
     private fun adjustFocusedParameter(steps: Int) {
         val hw = _hardwareState.value
         when (hw.currentPage) {
-            DisplayPage.INPUT_L -> adjustInputParam(isLeft = true, hw, steps)
-            DisplayPage.INPUT_R -> adjustInputParam(isLeft = false, hw, steps)
-            DisplayPage.CROSSOVER -> adjustCrossoverParam(hw, steps)
-            DisplayPage.OUTPUT_L -> adjustOutputParam(isLeft = true, hw, steps)
-            DisplayPage.OUTPUT_R -> adjustOutputParam(isLeft = false, hw, steps)
+            DisplayPage.CHANNEL_L -> adjustChannelParam(isLeft = true, hw, steps)
+            DisplayPage.CHANNEL_R -> adjustChannelParam(isLeft = false, hw, steps)
+            DisplayPage.CROSSOVER -> adjustCrossoverParam(isLeft = hw.crossoverChannelTab == 0, hw, steps)
             else -> {}
         }
     }
 
-    private fun adjustInputParam(isLeft: Boolean, hw: HardwareUiState, steps: Int) {
-        if (hw.inputSubTab == InputSubTab.MAIN) {
-            when (hw.focusIndex) {
-                0 -> updateInput(isLeft) { it.copy(gainDb = it.gainDb + steps * 0.5f) }
-                1 -> updateInput(isLeft) { it.copy(polarityInverted = !it.polarityInverted) }
-                2 -> updateInput(isLeft) { it.copy(muted = !it.muted) }
-                3 -> updateInput(isLeft) { it.copy(delayMs = it.delayMs + steps * 0.10f) }
+    private fun adjustChannelParam(isLeft: Boolean, hw: HardwareUiState, steps: Int) {
+        when (hw.channelSubTab) {
+            ChannelDspSubTab.MAIN -> when (hw.focusIndex) {
+                0 -> updateChannel(isLeft) { it.copy(inputGainDb = it.inputGainDb + steps * 0.5f) }
+                1 -> updateChannel(isLeft) { it.copy(inputPolarityInverted = !it.inputPolarityInverted) }
+                2 -> updateChannel(isLeft) { it.copy(delayMs = it.delayMs + steps * 0.10f) }
+                3 -> updateChannel(isLeft) { it.copy(outputGainDb = it.outputGainDb + steps * 0.5f) }
+                4 -> updateChannel(isLeft) { it.copy(muted = !it.muted) }
             }
-        } else {
-            adjustEqBand(
+            ChannelDspSubTab.EQ -> adjustEqBand(
                 bandIndex = hw.selectedEqBand,
                 field = hw.eqParamField,
                 steps = steps,
-                getBands = { if (isLeft) _dspState.value.inputL.eqBands else _dspState.value.inputR.eqBands },
-                setBands = { newBands -> updateInput(isLeft) { it.copy(eqBands = newBands) } }
+                getBands = { if (isLeft) _dspState.value.channelL.eqBands else _dspState.value.channelR.eqBands },
+                setBands = { newBands -> updateChannel(isLeft) { it.copy(eqBands = newBands) } }
             )
+            ChannelDspSubTab.XOVER -> adjustCrossoverParam(isLeft, hw, steps)
+            ChannelDspSubTab.LIMITER -> when (hw.focusIndex) {
+                0 -> updateChannelLimiter(isLeft) { it.copy(enabled = !it.enabled) }
+                1 -> updateChannelLimiter(isLeft) { it.copy(thresholdDbfs = it.thresholdDbfs + steps * 0.5f) }
+                2 -> updateChannelLimiter(isLeft) { it.copy(attackMs = it.attackMs + steps * 0.5f) }
+                3 -> updateChannelLimiter(isLeft) { it.copy(releaseMs = it.releaseMs + steps * 10f) }
+                4 -> updateChannelLimiter(isLeft) { it.copy(makeupGainDb = it.makeupGainDb + steps * 0.5f) }
+            }
         }
     }
 
-    private fun adjustCrossoverParam(hw: HardwareUiState, steps: Int) {
+    private fun adjustCrossoverParam(isLeft: Boolean, hw: HardwareUiState, steps: Int) {
         val isLow = hw.crossoverBandTab == 0
         when (hw.focusIndex) {
-            0 -> updateCrossoverBand(isLow) { band ->
+            0 -> updateChannelCrossoverBand(isLeft, isLow) { band ->
                 val factor = if (steps > 0) 1.05f else 0.952f
                 var freq = band.frequencyHz
-                repeat(kotlin.math.abs(steps)) { freq *= factor }
+                repeat(abs(steps)) { freq *= factor }
                 band.copy(frequencyHz = freq.coerceIn(20f, 20000f))
             }
-            1 -> updateCrossoverBand(isLow) { band ->
+            1 -> updateChannelCrossoverBand(isLeft, isLow) { band ->
                 val types = CrossoverFilterType.entries
                 val next = (types.indexOf(band.filterType) + if (steps > 0) 1 else -1).mod(types.size)
                 band.copy(filterType = types[next])
             }
-            2 -> updateCrossoverBand(isLow) { band ->
+            2 -> updateChannelCrossoverBand(isLeft, isLow) { band ->
                 val allowed = if (band.filterType == CrossoverFilterType.LINKWITZ_RILEY) {
                     listOf(CrossoverSlope.DB_12, CrossoverSlope.DB_24, CrossoverSlope.DB_48)
                 } else {
@@ -548,42 +534,7 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
                 val next = (idx + if (steps > 0) 1 else -1).mod(allowed.size)
                 band.copy(slope = allowed[next])
             }
-            3 -> updateCrossoverBand(isLow) { it.copy(bypass = !it.bypass) }
-        }
-    }
-
-    private fun adjustOutputParam(isLeft: Boolean, hw: HardwareUiState, steps: Int) {
-        when (hw.outputSubTab) {
-            OutputSubTab.MAIN -> when (hw.focusIndex) {
-                0 -> updateOutput(isLeft) { ch ->
-                    val list = OutputSource.entries
-                    val next = (list.indexOf(ch.source) + if (steps > 0) 1 else -1).mod(list.size)
-                    ch.copy(source = list[next])
-                }
-                1 -> updateOutput(isLeft) { ch ->
-                    val list = CrossoverBand.entries
-                    val next = (list.indexOf(ch.band) + if (steps > 0) 1 else -1).mod(list.size)
-                    ch.copy(band = list[next])
-                }
-                2 -> updateOutput(isLeft) { it.copy(gainDb = it.gainDb + steps * 0.5f) }
-                3 -> updateOutput(isLeft) { it.copy(delayMs = it.delayMs + steps * 0.10f) }
-                4 -> updateOutput(isLeft) { it.copy(polarityInverted = !it.polarityInverted) }
-                5 -> updateOutput(isLeft) { it.copy(muted = !it.muted) }
-            }
-            OutputSubTab.EQ -> adjustEqBand(
-                bandIndex = hw.selectedEqBand,
-                field = hw.eqParamField,
-                steps = steps,
-                getBands = { if (isLeft) _dspState.value.outputL.eqBands else _dspState.value.outputR.eqBands },
-                setBands = { newBands -> updateOutput(isLeft) { it.copy(eqBands = newBands) } }
-            )
-            OutputSubTab.LIMITER -> when (hw.focusIndex) {
-                0 -> updateOutput(isLeft) { it.copy(limiter = it.limiter.copy(enabled = !it.limiter.enabled)) }
-                1 -> updateOutput(isLeft) { it.copy(limiter = it.limiter.copy(thresholdDbfs = it.limiter.thresholdDbfs + steps * 0.5f)) }
-                2 -> updateOutput(isLeft) { it.copy(limiter = it.limiter.copy(attackMs = it.limiter.attackMs + steps * 0.5f)) }
-                3 -> updateOutput(isLeft) { it.copy(limiter = it.limiter.copy(releaseMs = it.limiter.releaseMs + steps * 10f)) }
-                4 -> updateOutput(isLeft) { it.copy(limiter = it.limiter.copy(makeupGainDb = it.limiter.makeupGainDb + steps * 0.5f)) }
-            }
+            3 -> updateChannelCrossoverBand(isLeft, isLow) { it.copy(bypass = !it.bypass) }
         }
     }
 
@@ -606,7 +557,7 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
             EqParamField.FREQ -> {
                 val factor = if (steps > 0) 1.05f else 0.952f
                 var f = band.frequencyHz
-                repeat(kotlin.math.abs(steps)) { f *= factor }
+                repeat(abs(steps)) { f *= factor }
                 band.copy(frequencyHz = f.coerceIn(20f, 20000f))
             }
             EqParamField.GAIN -> band.copy(gainDb = band.gainDb + steps * 0.5f)
@@ -616,71 +567,51 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
         setBands(current)
     }
 
-    // --- Direct DSP Mutations (Touch + Hardware share same single source of truth) ---
+    // --- Strictly Separated Per-Channel DSP Mutations ---
 
-    fun updateInputL(block: (InputChannelConfig) -> InputChannelConfig) = updateInput(true, block)
-    fun updateInputR(block: (InputChannelConfig) -> InputChannelConfig) = updateInput(false, block)
+    fun updateChannelL(block: (ChannelDspConfig) -> ChannelDspConfig) = updateChannel(true, block)
+    fun updateChannelR(block: (ChannelDspConfig) -> ChannelDspConfig) = updateChannel(false, block)
 
-    fun updateInput(isLeft: Boolean, block: (InputChannelConfig) -> InputChannelConfig) {
+    fun updateChannel(isLeft: Boolean, block: (ChannelDspConfig) -> ChannelDspConfig) {
         updateDsp { state ->
-            if (isLeft) state.copy(inputL = block(state.inputL))
-            else state.copy(inputR = block(state.inputR))
+            if (isLeft) state.copy(channelL = block(state.channelL))
+            else state.copy(channelR = block(state.channelR))
         }
     }
 
-    fun toggleInputEqBand(isLeft: Boolean, index: Int) {
-        updateInput(isLeft) { ch ->
+    fun toggleChannelEqBand(isLeft: Boolean, index: Int) {
+        updateChannel(isLeft) { ch ->
             val updated = ch.eqBands.mapIndexed { i, b -> if (i == index) b.copy(enabled = !b.enabled) else b }
             ch.copy(eqBands = updated)
         }
     }
 
-    fun updateInputEqBand(isLeft: Boolean, index: Int, block: (EqBandConfig) -> EqBandConfig) {
-        updateInput(isLeft) { ch ->
+    fun updateChannelEqBand(isLeft: Boolean, index: Int, block: (EqBandConfig) -> EqBandConfig) {
+        updateChannel(isLeft) { ch ->
             val updated = ch.eqBands.mapIndexed { i, b -> if (i == index) block(b) else b }
             ch.copy(eqBands = updated)
         }
     }
 
-    fun updateCrossoverBypass(bypass: Boolean) {
-        updateDsp { it.copy(crossover = it.crossover.copy(bypass = bypass)) }
+    fun updateChannelCrossoverBandSelector(isLeft: Boolean, band: CrossoverBand) {
+        updateChannel(isLeft) { it.copy(activeBand = band) }
     }
 
-    fun updateCrossoverBand(isLow: Boolean, block: (CrossoverBandConfig) -> CrossoverBandConfig) {
-        updateDsp { state ->
-            val xo = state.crossover
-            state.copy(
+    fun updateChannelCrossoverBypass(isLeft: Boolean, bypass: Boolean) {
+        updateChannel(isLeft) { it.copy(crossover = it.crossover.copy(bypass = bypass)) }
+    }
+
+    fun updateChannelCrossoverBand(isLeft: Boolean, isLow: Boolean, block: (CrossoverBandConfig) -> CrossoverBandConfig) {
+        updateChannel(isLeft) { ch ->
+            val xo = ch.crossover
+            ch.copy(
                 crossover = if (isLow) xo.copy(low = block(xo.low)) else xo.copy(high = block(xo.high))
             )
         }
     }
 
-    fun updateOutputL(block: (OutputChannelConfig) -> OutputChannelConfig) = updateOutput(true, block)
-    fun updateOutputR(block: (OutputChannelConfig) -> OutputChannelConfig) = updateOutput(false, block)
-
-    fun updateOutput(isLeft: Boolean, block: (OutputChannelConfig) -> OutputChannelConfig) {
-        updateDsp { state ->
-            if (isLeft) state.copy(outputL = block(state.outputL))
-            else state.copy(outputR = block(state.outputR))
-        }
-    }
-
-    fun toggleOutputEqBand(isLeft: Boolean, index: Int) {
-        updateOutput(isLeft) { ch ->
-            val updated = ch.eqBands.mapIndexed { i, b -> if (i == index) b.copy(enabled = !b.enabled) else b }
-            ch.copy(eqBands = updated)
-        }
-    }
-
-    fun updateOutputEqBand(isLeft: Boolean, index: Int, block: (EqBandConfig) -> EqBandConfig) {
-        updateOutput(isLeft) { ch ->
-            val updated = ch.eqBands.mapIndexed { i, b -> if (i == index) block(b) else b }
-            ch.copy(eqBands = updated)
-        }
-    }
-
-    fun updateOutputLimiter(isLeft: Boolean, block: (LimiterConfig) -> LimiterConfig) {
-        updateOutput(isLeft) { ch -> ch.copy(limiter = block(ch.limiter)) }
+    fun updateChannelLimiter(isLeft: Boolean, block: (LimiterConfig) -> LimiterConfig) {
+        updateChannel(isLeft) { ch -> ch.copy(limiter = block(ch.limiter)) }
     }
 
     private fun updateDsp(transform: (DspState) -> DspState) {
@@ -706,7 +637,7 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
             res.onSuccess { savedName ->
                 _activePresetName.value = savedName
                 settingsStore.saveLastDspState(savedName, presetRepo.encodeState(_dspState.value))
-                _statusBannerMessage.value = "Preset '$savedName' saved locally."
+                _statusBannerMessage.value = "Preset '$savedName' saved locally (L/R separate)."
             }.onFailure { err ->
                 _statusBannerMessage.value = err.message ?: "Failed to save preset."
             }
@@ -814,7 +745,7 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun restartAudioIfRunning() {
-        if (audioEngine.engineState.value.status == com.example.audio.AudioEngineStatus.READY) {
+        if (audioEngine.engineState.value.status == AudioEngineStatus.READY) {
             audioEngine.stop()
             startAudioEngine()
         }
@@ -935,10 +866,5 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
         val network = cm.activeNetwork ?: return false
         val caps = cm.getNetworkCapabilities(network) ?: return false
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        // Persist immediately if needed; audioEngine lives in Application so rotation won't drop audio
     }
 }

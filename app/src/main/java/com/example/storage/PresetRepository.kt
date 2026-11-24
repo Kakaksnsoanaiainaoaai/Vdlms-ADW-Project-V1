@@ -37,10 +37,11 @@ class PresetRepository(private val presetDao: PresetDao) {
 
     suspend fun ensureDefaultPreset() {
         val existing = presetDao.getByName(DEFAULT_PRESET_NAME)
-        if (existing == null) {
+        if (existing == null || decodeState(existing.dspJson) == null) {
             val neutral = DspState.neutralDefault()
             presetDao.upsert(
                 PresetEntity(
+                    id = existing?.id ?: 0,
                     name = DEFAULT_PRESET_NAME,
                     isFactoryDefault = true,
                     dspJson = encodeState(neutral)
@@ -97,7 +98,8 @@ class PresetRepository(private val presetDao: PresetDao) {
     fun encodeState(state: DspState): String = dspAdapter.toJson(state.validated())
 
     fun decodeState(json: String): DspState? = try {
-        dspAdapter.fromJson(json)?.validated()
+        if (!json.contains("channelL") || !json.contains("channelR")) null
+        else dspAdapter.fromJson(json)?.validated()
     } catch (_: Exception) {
         null
     }

@@ -4,19 +4,17 @@
 
 ## Fitur Utama
 
-- **Arsitektur Audio 2-Input / 2-Output Terpisah**
-  - `INPUT L + INPUT R → DSP Input Processing → 2-Way Crossover → DSP Output Processing → OUTPUT L + OUTPUT R`
-  - **Input L & Input R**: Gain (`-24` s/d `+12 dB`), Polarity (`0° / 180°`), Mute, Delay (`0–50 ms` + konversi meter), Parametric EQ 5-Band dengan grafik respons frekuensi real-time, serta VU meter terpisah.
-  - **Crossover 2-Way (LOW / HIGH)**: Filter **Butterworth** (`12 / 18 / 24 / 48 dB/oct`) dan **Linkwitz-Riley** (`12 / 24 / 48 dB/oct`), frekuensi `20 Hz – 20 kHz`, bypass per band/global, dan grafik respons frekuensi matematis.
-  - **Output L & Output R**: Matrix routing (`IN L`, `IN R`, `L+R SUM`), band assignment (`LOW`, `HIGH`, `FULL`), Gain, Delay (`ms` & `meter`), Polarity, Mute, Parametric EQ 5-Band, dan Peak Limiter (`Threshold`, `Attack`, `Release`, `Make-up Gain`, indikator aktif + gain reduction meter).
+- **Arsitektur Audio 2-Channel Terpisah Total (`CHANNEL L` & `CHANNEL R`)**
+  - `SOURCE STEREO → [INPUT L → DSP ENGINE L → OUTPUT L] & [INPUT R → DSP ENGINE R → OUTPUT R]`
+  - Tidak ada pemrosesan DSP global bersama: **Channel L** dan **Channel R** masing-masing memiliki instance engine tersendiri untuk **Input Gain**, **5-Band Parametric EQ** (`EQ L` / `EQ R`), **Delay** (`0–50 ms` + konversi meter), **2-Way Crossover** (`XOVER L` / `XOVER R` dengan filter Butterworth & Linkwitz-Riley, slope `12/18/24/48 dB/oct`, pilihan band `LOW / HIGH / FULL`), **Output Gain**, **Limiter** (`LIMITER L` / `LIMITER R`), **Mute** (`MUTE L` / `MUTE R`), dan **VU Meter** (`IN L/R`, `OUT L/R`).
 - **Audio Engine Multi-Source & Routing Nyata**
   - **DEVICE INPUT**: Menggunakan `AudioRecord` + `DlmsDspProcessor` + `AudioTrack` (`PERFORMANCE_MODE_LOW_LATENCY` pada API 26+) dengan deteksi perangkat input/output dan sample rate aktual perangkat.
-  - **INTERNAL MEDIA**: Mendekode file audio lokal resmi (`OpenDocument` + `MediaExtractor` + `MediaCodec`) menjadi PCM stereo `IN L / IN R` untuk diproses langsung oleh DSP 2-Way DLMS secara real-time.
+  - **INTERNAL MEDIA**: Mendekode file audio lokal resmi (`OpenDocument` + `MediaExtractor` + `MediaCodec`) menjadi PCM stereo `IN L / IN R` untuk diproses langsung oleh `ChannelDspEngine` L dan R secara terpisah.
   - **YOUTUBE**: Menampilkan status jujur `YOUTUBE AUDIO ROUTING: NOT AVAILABLE` karena player resmi YouTube tidak membuka stream PCM mentah akibat aturan YouTube & proteksi DRM (tanpa downloader, stream scraping, atau meter palsu).
 - **Kontrol Hardware Rack Virtual**
-  - Tombol fisik virtual (`MENU`, `BACK`, `ENTER`, D-Pad `UP/DOWN/LEFT/RIGHT`, `MUTE`, `SOURCE`, pemilih channel `IN L`, `IN R`, `X-OVER`, `OUT L`, `OUT R`, `YT`), LED indikator, serta **Rotary Encoder** virtual (`TURN` untuk navigasi/ubah nilai, `PUSH = ENTER`).
+  - Tombol fisik virtual (`MENU`, `BACK`, `ENTER`, D-Pad `UP/DOWN/LEFT/RIGHT`, `MUTE`, `SOURCE`, pemilih channel `CH L`, `CH R`, `X-OVER`, `LIM L`, `LIM R`, `YT`), LED indikator, serta **Rotary Encoder** virtual (`TURN` untuk navigasi/ubah nilai, `PUSH = ENTER`).
 - **Preset & Penyimpanan Lokal**
-  - Save, Load, Rename, Delete, dan Reset ke preset netral `DEFAULT` menggunakan **Room Database** dan **DataStore Preferences**.
+  - Save, Load, Rename, Delete, dan Reset ke preset netral `DEFAULT` menggunakan **Room Database** dan **DataStore Preferences** dengan penyimpanan parameter Channel L dan Channel R secara terpisah.
 - **Media / YouTube Terintegrasi**
   - Terhubung langsung ke YouTube di dalam aplikasi (`m.youtube.com` & IFrame Player resmi) tanpa API key dan tetap mematuhi ketentuan resmi YouTube.
 

@@ -115,10 +115,12 @@ fun DisplayPresetsScreen(
                             fontWeight = FontWeight.Bold,
                             color = if (isActive) palette.lcdPrimary else palette.lcdText
                         )
+                        val chL = preset.dspState.channelL
+                        val chR = preset.dspState.channelR
                         Text(
-                            text = "XOVER ${preset.dspState.crossover.low.frequencyHz.toInt()}Hz | IN ${preset.dspState.inputL.gainDb}/${preset.dspState.inputR.gainDb}dB",
+                            text = "L:${chL.activeBand.label} ${chL.crossover.low.frequencyHz.toInt()}Hz (${chL.inputGainDb}/${chL.outputGainDb}dB) | R:${chR.activeBand.label} ${chR.crossover.high.frequencyHz.toInt()}Hz (${chR.inputGainDb}/${chR.outputGainDb}dB)",
                             fontFamily = JetBrainsMonoFamily,
-                            fontSize = 9.sp,
+                            fontSize = 8.sp,
                             color = palette.lcdMutedText
                         )
                     }

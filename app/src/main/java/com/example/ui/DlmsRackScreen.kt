@@ -60,6 +60,7 @@ import com.example.audio.AudioRoutingStatus
 import com.example.audio.AudioSourceType
 import com.example.dsp.AudioTelemetry
 import com.example.dsp.DspState
+import com.example.hardware.ChannelDspSubTab
 import com.example.hardware.DisplayPage
 import com.example.hardware.HardwareKey
 import com.example.hardware.HardwareUiState
@@ -70,11 +71,10 @@ import com.example.ui.components.HardwareStatusLed
 import com.example.ui.components.RackMountingEar
 import com.example.ui.components.RotaryEncoderKnob
 import com.example.ui.screens.DisplayAudioSourceScreen
+import com.example.ui.screens.DisplayChannelDspScreen
 import com.example.ui.screens.DisplayCrossoverScreen
 import com.example.ui.screens.DisplayHomeScreen
-import com.example.ui.screens.DisplayInputScreen
 import com.example.ui.screens.DisplayMenuScreen
-import com.example.ui.screens.DisplayOutputScreen
 import com.example.ui.screens.DisplayPresetsScreen
 import com.example.ui.screens.DisplaySettingsScreen
 import com.example.ui.screens.LcdSystemStatusBar
@@ -309,17 +309,17 @@ private fun LandscapeRackLayout(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         HardwarePushButton(
-                            label = "IN L",
-                            isActive = hwState.currentPage == DisplayPage.INPUT_L,
-                            ledColor = if (dspState.inputL.muted) palette.meterRed else palette.lcdPrimary,
+                            label = "CH L",
+                            isActive = hwState.currentPage == DisplayPage.CHANNEL_L && hwState.channelSubTab != ChannelDspSubTab.LIMITER,
+                            ledColor = if (dspState.channelL.muted) palette.meterRed else palette.lcdPrimary,
                             onClick = { viewModel.onHardwareKey(HardwareKey.QUICK_IN_L) },
                             compact = true,
                             modifier = Modifier.weight(1f)
                         )
                         HardwarePushButton(
-                            label = "IN R",
-                            isActive = hwState.currentPage == DisplayPage.INPUT_R,
-                            ledColor = if (dspState.inputR.muted) palette.meterRed else palette.lcdPrimary,
+                            label = "CH R",
+                            isActive = hwState.currentPage == DisplayPage.CHANNEL_R && hwState.channelSubTab != ChannelDspSubTab.LIMITER,
+                            ledColor = if (dspState.channelR.muted) palette.meterRed else palette.lcdPrimary,
                             onClick = { viewModel.onHardwareKey(HardwareKey.QUICK_IN_R) },
                             compact = true,
                             modifier = Modifier.weight(1f)
@@ -338,17 +338,17 @@ private fun LandscapeRackLayout(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         HardwarePushButton(
-                            label = "OUT L",
-                            isActive = hwState.currentPage == DisplayPage.OUTPUT_L,
-                            ledColor = if (dspState.outputL.muted) palette.meterRed else palette.meterGreen,
+                            label = "LIM L",
+                            isActive = hwState.currentPage == DisplayPage.CHANNEL_L && hwState.channelSubTab == ChannelDspSubTab.LIMITER,
+                            ledColor = if (dspState.channelL.muted) palette.meterRed else palette.meterGreen,
                             onClick = { viewModel.onHardwareKey(HardwareKey.QUICK_OUT_L) },
                             compact = true,
                             modifier = Modifier.weight(1f)
                         )
                         HardwarePushButton(
-                            label = "OUT R",
-                            isActive = hwState.currentPage == DisplayPage.OUTPUT_R,
-                            ledColor = if (dspState.outputR.muted) palette.meterRed else palette.meterGreen,
+                            label = "LIM R",
+                            isActive = hwState.currentPage == DisplayPage.CHANNEL_R && hwState.channelSubTab == ChannelDspSubTab.LIMITER,
+                            ledColor = if (dspState.channelR.muted) palette.meterRed else palette.meterGreen,
                             onClick = { viewModel.onHardwareKey(HardwareKey.QUICK_OUT_R) },
                             compact = true,
                             modifier = Modifier.weight(1f)
@@ -359,11 +359,9 @@ private fun LandscapeRackLayout(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         val muteLit = when (hwState.currentPage) {
-                            DisplayPage.INPUT_L -> dspState.inputL.muted
-                            DisplayPage.INPUT_R -> dspState.inputR.muted
-                            DisplayPage.OUTPUT_L -> dspState.outputL.muted
-                            DisplayPage.OUTPUT_R -> dspState.outputR.muted
-                            else -> dspState.outputL.muted && dspState.outputR.muted
+                            DisplayPage.CHANNEL_L -> dspState.channelL.muted
+                            DisplayPage.CHANNEL_R -> dspState.channelR.muted
+                            else -> dspState.channelL.muted && dspState.channelR.muted
                         }
                         HardwarePushButton(
                             label = "MUTE",
@@ -533,23 +531,23 @@ private fun PortraitRackLayout(
                 .padding(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            // Row 1: Channel Select + Mute + Media
+            // Row 1: Channel Select + XOVER + Limiter
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 HardwarePushButton(
-                    label = "IN L",
-                    isActive = hwState.currentPage == DisplayPage.INPUT_L,
-                    ledColor = if (dspState.inputL.muted) palette.meterRed else palette.lcdPrimary,
+                    label = "CH L",
+                    isActive = hwState.currentPage == DisplayPage.CHANNEL_L && hwState.channelSubTab != ChannelDspSubTab.LIMITER,
+                    ledColor = if (dspState.channelL.muted) palette.meterRed else palette.lcdPrimary,
                     onClick = { viewModel.onHardwareKey(HardwareKey.QUICK_IN_L) },
                     compact = true,
                     modifier = Modifier.weight(1f)
                 )
                 HardwarePushButton(
-                    label = "IN R",
-                    isActive = hwState.currentPage == DisplayPage.INPUT_R,
-                    ledColor = if (dspState.inputR.muted) palette.meterRed else palette.lcdPrimary,
+                    label = "CH R",
+                    isActive = hwState.currentPage == DisplayPage.CHANNEL_R && hwState.channelSubTab != ChannelDspSubTab.LIMITER,
+                    ledColor = if (dspState.channelR.muted) palette.meterRed else palette.lcdPrimary,
                     onClick = { viewModel.onHardwareKey(HardwareKey.QUICK_IN_R) },
                     compact = true,
                     modifier = Modifier.weight(1f)
@@ -563,17 +561,17 @@ private fun PortraitRackLayout(
                     modifier = Modifier.weight(1f)
                 )
                 HardwarePushButton(
-                    label = "OUT L",
-                    isActive = hwState.currentPage == DisplayPage.OUTPUT_L,
-                    ledColor = if (dspState.outputL.muted) palette.meterRed else palette.meterGreen,
+                    label = "LIM L",
+                    isActive = hwState.currentPage == DisplayPage.CHANNEL_L && hwState.channelSubTab == ChannelDspSubTab.LIMITER,
+                    ledColor = if (dspState.channelL.muted) palette.meterRed else palette.meterGreen,
                     onClick = { viewModel.onHardwareKey(HardwareKey.QUICK_OUT_L) },
                     compact = true,
                     modifier = Modifier.weight(1f)
                 )
                 HardwarePushButton(
-                    label = "OUT R",
-                    isActive = hwState.currentPage == DisplayPage.OUTPUT_R,
-                    ledColor = if (dspState.outputR.muted) palette.meterRed else palette.meterGreen,
+                    label = "LIM R",
+                    isActive = hwState.currentPage == DisplayPage.CHANNEL_R && hwState.channelSubTab == ChannelDspSubTab.LIMITER,
+                    ledColor = if (dspState.channelR.muted) palette.meterRed else palette.meterGreen,
                     onClick = { viewModel.onHardwareKey(HardwareKey.QUICK_OUT_R) },
                     compact = true,
                     modifier = Modifier.weight(1f)
@@ -630,11 +628,9 @@ private fun PortraitRackLayout(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         val muteLit = when (hwState.currentPage) {
-                            DisplayPage.INPUT_L -> dspState.inputL.muted
-                            DisplayPage.INPUT_R -> dspState.inputR.muted
-                            DisplayPage.OUTPUT_L -> dspState.outputL.muted
-                            DisplayPage.OUTPUT_R -> dspState.outputR.muted
-                            else -> dspState.outputL.muted && dspState.outputR.muted
+                            DisplayPage.CHANNEL_L -> dspState.channelL.muted
+                            DisplayPage.CHANNEL_R -> dspState.channelR.muted
+                            else -> dspState.channelL.muted && dspState.channelR.muted
                         }
                         HardwarePushButton(
                             label = "MUTE",
@@ -741,22 +737,22 @@ private fun ChassisTopSilkscreen(
             )
             HardwareStatusLed(
                 label = "IN-L",
-                isLit = telemetry.inputL.rmsDb > -48f && !dspState.inputL.muted,
+                isLit = telemetry.inputL.rmsDb > -48f,
                 litColor = if (telemetry.inputL.clipped) palette.meterRed else palette.meterGreen
             )
             HardwareStatusLed(
                 label = "IN-R",
-                isLit = telemetry.inputR.rmsDb > -48f && !dspState.inputR.muted,
+                isLit = telemetry.inputR.rmsDb > -48f,
                 litColor = if (telemetry.inputR.clipped) palette.meterRed else palette.meterGreen
             )
             HardwareStatusLed(
                 label = "OUT-L",
-                isLit = telemetry.outputL.rmsDb > -48f && !dspState.outputL.muted,
+                isLit = telemetry.outputL.rmsDb > -48f && !dspState.channelL.muted,
                 litColor = if (telemetry.outputL.limiterActive) palette.meterYellow else palette.meterGreen
             )
             HardwareStatusLed(
                 label = "OUT-R",
-                isLit = telemetry.outputR.rmsDb > -48f && !dspState.outputR.muted,
+                isLit = telemetry.outputR.rmsDb > -48f && !dspState.channelR.muted,
                 litColor = if (telemetry.outputR.limiterActive) palette.meterYellow else palette.meterGreen
             )
         }
@@ -786,7 +782,7 @@ private fun DisplayViewport(
         Column(modifier = Modifier.fillMaxSize()) {
             LcdSystemStatusBar(
                 dspEnabled = dspState.dspEnabled,
-                crossoverBypass = dspState.crossover.bypass,
+                crossoverBypass = dspState.channelL.crossover.bypass && dspState.channelR.crossover.bypass,
                 audioState = audioState,
                 activePresetName = activePresetName,
                 pageTitle = hwState.currentPage.title,
@@ -831,85 +827,68 @@ private fun DisplayViewport(
                         onOpenYouTubePlayer = { viewModel.navigateTo(DisplayPage.MEDIA_YOUTUBE) }
                     )
 
-                    DisplayPage.INPUT_L -> DisplayInputScreen(
-                        channelLabel = "INPUT L",
-                        config = dspState.inputL,
-                        inputLTelemetry = telemetry.inputL,
-                        inputRTelemetry = telemetry.inputR,
-                        inputLMuted = dspState.inputL.muted,
-                        inputRMuted = dspState.inputR.muted,
+                    DisplayPage.CHANNEL_L -> DisplayChannelDspScreen(
+                        isLeftChannel = true,
+                        config = dspState.channelL,
+                        inputTelemetry = telemetry.inputL,
+                        outputTelemetry = telemetry.outputL,
                         audioState = audioState,
                         hwState = hwState,
                         meterStyle = settings.meterStyle,
+                        onSwitchChannel = { toLeft ->
+                            viewModel.navigateTo(if (toLeft) DisplayPage.CHANNEL_L else DisplayPage.CHANNEL_R)
+                        },
                         onOpenAudioSource = { viewModel.navigateTo(DisplayPage.AUDIO_SOURCE) },
-                        onSelectSubTab = { viewModel.setInputSubTab(it) },
+                        onSelectSubTab = { viewModel.setChannelSubTab(it) },
+                        onSelectCrossoverBandTab = { viewModel.setCrossoverBandTab(it) },
                         onFocusParam = { viewModel.selectAndEditParameter(it) },
-                        onUpdateConfig = { viewModel.updateInputL(it) },
+                        onUpdateChannel = { viewModel.updateChannelL(it) },
                         onSelectEqBand = { viewModel.selectEqBand(it) },
                         onSelectEqField = { viewModel.selectEqField(it) },
-                        onToggleEqBand = { viewModel.toggleInputEqBand(true, it) },
-                        onUpdateEqBand = { idx, blk -> viewModel.updateInputEqBand(true, idx, blk) }
+                        onToggleEqBand = { viewModel.toggleChannelEqBand(true, it) },
+                        onUpdateEqBand = { idx, blk -> viewModel.updateChannelEqBand(true, idx, blk) },
+                        onSelectActiveBand = { viewModel.updateChannelCrossoverBandSelector(true, it) },
+                        onToggleCrossoverBypass = { viewModel.updateChannelCrossoverBypass(true, it) },
+                        onUpdateCrossoverBand = { isLow, blk -> viewModel.updateChannelCrossoverBand(true, isLow, blk) },
+                        onUpdateLimiter = { viewModel.updateChannelLimiter(true, it) }
                     )
 
-                    DisplayPage.INPUT_R -> DisplayInputScreen(
-                        channelLabel = "INPUT R",
-                        config = dspState.inputR,
-                        inputLTelemetry = telemetry.inputL,
-                        inputRTelemetry = telemetry.inputR,
-                        inputLMuted = dspState.inputL.muted,
-                        inputRMuted = dspState.inputR.muted,
+                    DisplayPage.CHANNEL_R -> DisplayChannelDspScreen(
+                        isLeftChannel = false,
+                        config = dspState.channelR,
+                        inputTelemetry = telemetry.inputR,
+                        outputTelemetry = telemetry.outputR,
                         audioState = audioState,
                         hwState = hwState,
                         meterStyle = settings.meterStyle,
+                        onSwitchChannel = { toLeft ->
+                            viewModel.navigateTo(if (toLeft) DisplayPage.CHANNEL_L else DisplayPage.CHANNEL_R)
+                        },
                         onOpenAudioSource = { viewModel.navigateTo(DisplayPage.AUDIO_SOURCE) },
-                        onSelectSubTab = { viewModel.setInputSubTab(it) },
+                        onSelectSubTab = { viewModel.setChannelSubTab(it) },
+                        onSelectCrossoverBandTab = { viewModel.setCrossoverBandTab(it) },
                         onFocusParam = { viewModel.selectAndEditParameter(it) },
-                        onUpdateConfig = { viewModel.updateInputR(it) },
+                        onUpdateChannel = { viewModel.updateChannelR(it) },
                         onSelectEqBand = { viewModel.selectEqBand(it) },
                         onSelectEqField = { viewModel.selectEqField(it) },
-                        onToggleEqBand = { viewModel.toggleInputEqBand(false, it) },
-                        onUpdateEqBand = { idx, blk -> viewModel.updateInputEqBand(false, idx, blk) }
+                        onToggleEqBand = { viewModel.toggleChannelEqBand(false, it) },
+                        onUpdateEqBand = { idx, blk -> viewModel.updateChannelEqBand(false, idx, blk) },
+                        onSelectActiveBand = { viewModel.updateChannelCrossoverBandSelector(false, it) },
+                        onToggleCrossoverBypass = { viewModel.updateChannelCrossoverBypass(false, it) },
+                        onUpdateCrossoverBand = { isLow, blk -> viewModel.updateChannelCrossoverBand(false, isLow, blk) },
+                        onUpdateLimiter = { viewModel.updateChannelLimiter(false, it) }
                     )
 
                     DisplayPage.CROSSOVER -> DisplayCrossoverScreen(
-                        crossover = dspState.crossover,
+                        channelL = dspState.channelL,
+                        channelR = dspState.channelR,
                         hwState = hwState,
+                        onSelectChannelTab = { viewModel.setCrossoverChannelTab(it) },
                         onSelectBandTab = { viewModel.setCrossoverBandTab(it) },
                         onFocusParam = { viewModel.selectAndEditParameter(it) },
-                        onToggleGlobalBypass = { viewModel.updateCrossoverBypass(it) },
-                        onUpdateBand = { isLow, blk -> viewModel.updateCrossoverBand(isLow, blk) }
-                    )
-
-                    DisplayPage.OUTPUT_L -> DisplayOutputScreen(
-                        channelLabel = "OUTPUT L",
-                        config = dspState.outputL,
-                        telemetry = telemetry.outputL,
-                        hwState = hwState,
-                        meterStyle = settings.meterStyle,
-                        onSelectSubTab = { viewModel.setOutputSubTab(it) },
-                        onFocusParam = { viewModel.selectAndEditParameter(it) },
-                        onUpdateConfig = { viewModel.updateOutputL(it) },
-                        onSelectEqBand = { viewModel.selectEqBand(it) },
-                        onSelectEqField = { viewModel.selectEqField(it) },
-                        onToggleEqBand = { viewModel.toggleOutputEqBand(true, it) },
-                        onUpdateEqBand = { idx, blk -> viewModel.updateOutputEqBand(true, idx, blk) },
-                        onUpdateLimiter = { viewModel.updateOutputLimiter(true, it) }
-                    )
-
-                    DisplayPage.OUTPUT_R -> DisplayOutputScreen(
-                        channelLabel = "OUTPUT R",
-                        config = dspState.outputR,
-                        telemetry = telemetry.outputR,
-                        hwState = hwState,
-                        meterStyle = settings.meterStyle,
-                        onSelectSubTab = { viewModel.setOutputSubTab(it) },
-                        onFocusParam = { viewModel.selectAndEditParameter(it) },
-                        onUpdateConfig = { viewModel.updateOutputR(it) },
-                        onSelectEqBand = { viewModel.selectEqBand(it) },
-                        onSelectEqField = { viewModel.selectEqField(it) },
-                        onToggleEqBand = { viewModel.toggleOutputEqBand(false, it) },
-                        onUpdateEqBand = { idx, blk -> viewModel.updateOutputEqBand(false, idx, blk) },
-                        onUpdateLimiter = { viewModel.updateOutputLimiter(false, it) }
+                        onSelectActiveBand = { isLeft, band -> viewModel.updateChannelCrossoverBandSelector(isLeft, band) },
+                        onToggleGlobalBypass = { isLeft, bypass -> viewModel.updateChannelCrossoverBypass(isLeft, bypass) },
+                        onUpdateBand = { isLeft, isLow, blk -> viewModel.updateChannelCrossoverBand(isLeft, isLow, blk) }
                     )
 
                     DisplayPage.PRESETS -> DisplayPresetsScreen(

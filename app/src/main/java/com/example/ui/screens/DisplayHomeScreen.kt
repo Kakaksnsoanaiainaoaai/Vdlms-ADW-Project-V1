@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -32,6 +31,9 @@ import com.example.audio.AudioEngineStatus
 import com.example.audio.AudioRoutingStatus
 import com.example.audio.AudioSourceType
 import com.example.dsp.AudioTelemetry
+import com.example.dsp.ChannelDspConfig
+import com.example.dsp.ChannelTelemetry
+import com.example.dsp.CrossoverBand
 import com.example.dsp.DspState
 import com.example.hardware.DisplayPage
 import com.example.storage.MeterStyleOption
@@ -62,173 +64,42 @@ fun DisplayHomeScreen(
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // Real-time I/O Metering Matrix (2 IN + XOVER + 2 OUT)
+        // Strictly Separated Dual-Channel DSP Matrix: CHANNEL L | CHANNEL R
         Row(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // INPUTS BLOCK
-            ChannelMeterGroup(
-                title = "INPUTS (L / R)",
+            IndependentChannelRackCard(
+                channelName = "CHANNEL L",
+                shortTag = "L",
+                config = dspState.channelL,
+                inTelemetry = telemetry.inputL,
+                outTelemetry = telemetry.outputL,
+                meterStyle = meterStyle,
+                accentColor = palette.lcdPrimary,
+                onClick = { onOpenPage(DisplayPage.CHANNEL_L) },
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-            ) {
-                ChannelStripColumn(
-                    name = "IN L",
-                    gainDb = dspState.inputL.gainDb,
-                    muted = dspState.inputL.muted,
-                    polInverted = dspState.inputL.polarityInverted,
-                    delayMs = dspState.inputL.delayMs,
-                    onClick = { onOpenPage(DisplayPage.INPUT_L) },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    VerticalVuMeter(
-                        label = "L",
-                        telemetry = telemetry.inputL,
-                        meterStyle = meterStyle,
-                        isMuted = dspState.inputL.muted,
-                        modifier = Modifier.fillMaxHeight()
-                    )
-                }
-                ChannelStripColumn(
-                    name = "IN R",
-                    gainDb = dspState.inputR.gainDb,
-                    muted = dspState.inputR.muted,
-                    polInverted = dspState.inputR.polarityInverted,
-                    delayMs = dspState.inputR.delayMs,
-                    onClick = { onOpenPage(DisplayPage.INPUT_R) },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    VerticalVuMeter(
-                        label = "R",
-                        telemetry = telemetry.inputR,
-                        meterStyle = meterStyle,
-                        isMuted = dspState.inputR.muted,
-                        modifier = Modifier.fillMaxHeight()
-                    )
-                }
-            }
+                    .testTag("home_channel_l_card")
+            )
 
-            // CENTER CROSSOVER SUMMARY
-            Column(
-                modifier = Modifier
-                    .width(96.dp)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color.Black.copy(alpha = 0.35f))
-                    .border(1.dp, palette.lcdGrid, RoundedCornerShape(4.dp))
-                    .clickable { onOpenPage(DisplayPage.CROSSOVER) }
-                    .padding(6.dp),
-                verticalArrangement = Arrangement.SpaceBetween,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "2-WAY XOVER",
-                    fontFamily = JetBrainsMonoFamily,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = palette.lcdPrimary
-                )
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "LOW LPF",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 8.sp,
-                        color = palette.lcdMutedText
-                    )
-                    Text(
-                        text = "${dspState.crossover.low.frequencyHz.toInt()} Hz",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.lcdPrimary
-                    )
-                    Text(
-                        text = "${dspState.crossover.low.filterType.shortLabel} ${dspState.crossover.low.slope.dbPerOct}dB",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 8.sp,
-                        color = palette.lcdText
-                    )
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "HIGH HPF",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 8.sp,
-                        color = palette.lcdMutedText
-                    )
-                    Text(
-                        text = "${dspState.crossover.high.frequencyHz.toInt()} Hz",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.lcdSecondary
-                    )
-                    Text(
-                        text = "${dspState.crossover.high.filterType.shortLabel} ${dspState.crossover.high.slope.dbPerOct}dB",
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 8.sp,
-                        color = palette.lcdText
-                    )
-                }
-                Text(
-                    text = if (dspState.crossover.bypass) "BYPASSED" else "ACTIVE",
-                    fontFamily = JetBrainsMonoFamily,
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (dspState.crossover.bypass) palette.meterYellow else palette.meterGreen
-                )
-            }
-
-            // OUTPUTS BLOCK
-            ChannelMeterGroup(
-                title = "OUTPUTS (L / R)",
+            IndependentChannelRackCard(
+                channelName = "CHANNEL R",
+                shortTag = "R",
+                config = dspState.channelR,
+                inTelemetry = telemetry.inputR,
+                outTelemetry = telemetry.outputR,
+                meterStyle = meterStyle,
+                accentColor = palette.lcdSecondary,
+                onClick = { onOpenPage(DisplayPage.CHANNEL_R) },
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-            ) {
-                ChannelStripColumn(
-                    name = "OUT L",
-                    gainDb = dspState.outputL.gainDb,
-                    muted = dspState.outputL.muted,
-                    polInverted = dspState.outputL.polarityInverted,
-                    delayMs = dspState.outputL.delayMs,
-                    badge = dspState.outputL.band.label,
-                    onClick = { onOpenPage(DisplayPage.OUTPUT_L) },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    VerticalVuMeter(
-                        label = "L",
-                        telemetry = telemetry.outputL,
-                        meterStyle = meterStyle,
-                        isMuted = dspState.outputL.muted,
-                        showLimiterGr = true,
-                        modifier = Modifier.fillMaxHeight()
-                    )
-                }
-                ChannelStripColumn(
-                    name = "OUT R",
-                    gainDb = dspState.outputR.gainDb,
-                    muted = dspState.outputR.muted,
-                    polInverted = dspState.outputR.polarityInverted,
-                    delayMs = dspState.outputR.delayMs,
-                    badge = dspState.outputR.band.label,
-                    onClick = { onOpenPage(DisplayPage.OUTPUT_R) },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    VerticalVuMeter(
-                        label = "R",
-                        telemetry = telemetry.outputR,
-                        meterStyle = meterStyle,
-                        isMuted = dspState.outputR.muted,
-                        showLimiterGr = true,
-                        modifier = Modifier.fillMaxHeight()
-                    )
-                }
-            }
+                    .testTag("home_channel_r_card")
+            )
         }
 
         // Audio Source Selector + Real Audio Routing Strip
@@ -280,17 +151,17 @@ fun DisplayHomeScreen(
                             "YOUTUBE AUDIO ROUTING: NOT AVAILABLE (DRM/ToS)"
                         AudioSourceType.INTERNAL_MEDIA -> when {
                             audioState.mediaState.isPlaying ->
-                                "SOURCE → DSP: ${audioState.mediaState.trackName}"
+                                "STEREO L/R → DSP L/R: ${audioState.mediaState.trackName}"
                             audioState.mediaState.hasTrack ->
                                 "PAUSED: ${audioState.mediaState.trackName}"
                             audioState.mediaState.errorMessage != null ->
                                 audioState.mediaState.errorMessage
-                            else -> "Pick a local audio file to route into DSP."
+                            else -> "Pick a local audio file to route stereo L/R into DSP."
                         }
                         AudioSourceType.DEVICE_INPUT -> when (audioState.status) {
                             AudioEngineStatus.READY -> {
                                 val fb = if (audioState.isFeedbackRisk) " | Use headphones" else ""
-                                "SOURCE → DSP: ${audioState.activeInputDeviceName}$fb"
+                                "LIVE L/R → DSP L/R: ${audioState.activeInputDeviceName}$fb"
                             }
                             AudioEngineStatus.NOT_CONNECTED ->
                                 "Device Input idle. Tap START AUDIO to route."
@@ -365,97 +236,139 @@ fun DisplayHomeScreen(
 }
 
 @Composable
-private fun ChannelMeterGroup(
-    title: String,
-    modifier: Modifier = Modifier,
-    content: @Composable () -> Unit
+private fun IndependentChannelRackCard(
+    channelName: String,
+    shortTag: String,
+    config: ChannelDspConfig,
+    inTelemetry: ChannelTelemetry,
+    outTelemetry: ChannelTelemetry,
+    meterStyle: MeterStyleOption,
+    accentColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val palette = LocalDlmsPalette.current
+    val xoBandCfg = when (config.activeBand) {
+        CrossoverBand.LOW -> config.crossover.low
+        CrossoverBand.HIGH -> config.crossover.high
+        CrossoverBand.FULL -> config.crossover.low
+    }
+
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(4.dp))
-            .background(Color.Black.copy(alpha = 0.35f))
-            .border(1.dp, palette.lcdGrid, RoundedCornerShape(4.dp))
-            .padding(5.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .background(Color.Black.copy(alpha = 0.38f))
+            .border(
+                width = 1.dp,
+                color = if (config.muted) palette.meterRed.copy(alpha = 0.7f) else accentColor.copy(alpha = 0.6f),
+                shape = RoundedCornerShape(4.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Text(
-            text = title,
-            fontFamily = JetBrainsMonoFamily,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
-            color = palette.lcdMutedText
-        )
-        Spacer(modifier = Modifier.height(3.dp))
+        // Channel Header + Mute Badge
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = channelName,
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = accentColor
+            )
+            Text(
+                text = if (config.muted) "MUTE $shortTag" else config.activeBand.label,
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 8.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (config.muted) palette.meterRed else palette.meterGreen
+            )
+        }
+
+        // Separated IN & OUT Vertical VU Meters for this channel
         Row(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            content()
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(palette.lcdGrid.copy(alpha = 0.25f))
+                    .padding(3.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                VerticalVuMeter(
+                    label = "IN $shortTag",
+                    telemetry = inTelemetry,
+                    meterStyle = meterStyle,
+                    isMuted = false,
+                    modifier = Modifier.fillMaxHeight()
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(palette.lcdGrid.copy(alpha = 0.25f))
+                    .padding(3.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                VerticalVuMeter(
+                    label = "OUT $shortTag",
+                    telemetry = outTelemetry,
+                    meterStyle = meterStyle,
+                    isMuted = config.muted,
+                    showLimiterGr = true,
+                    modifier = Modifier.fillMaxHeight()
+                )
+            }
         }
-    }
-}
 
-@Composable
-private fun ChannelStripColumn(
-    name: String,
-    gainDb: Float,
-    muted: Boolean,
-    polInverted: Boolean,
-    delayMs: Float,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    badge: String? = null,
-    meterContent: @Composable () -> Unit
-) {
-    val palette = LocalDlmsPalette.current
-    Column(
-        modifier = modifier
-            .fillMaxHeight()
-            .clip(RoundedCornerShape(3.dp))
-            .background(palette.lcdGrid.copy(alpha = 0.28f))
-            .clickable(onClick = onClick)
-            .padding(3.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = name,
-            fontFamily = JetBrainsMonoFamily,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (muted) palette.meterRed else palette.lcdText
-        )
-        if (badge != null) {
+        // Independent DSP Chain Summary for this channel
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(3.dp))
+                .background(palette.lcdGrid.copy(alpha = 0.22f))
+                .padding(horizontal = 5.dp, vertical = 3.dp),
+            verticalArrangement = Arrangement.spacedBy(1.dp)
+        ) {
             Text(
-                text = badge,
+                text = String.format(
+                    Locale.US,
+                    "IN:%+.1fdB OUT:%+.1fdB DLY:%.1fms",
+                    config.inputGainDb,
+                    config.outputGainDb,
+                    config.delayMs
+                ),
                 fontFamily = JetBrainsMonoFamily,
                 fontSize = 8.sp,
-                color = palette.lcdSecondary
+                color = palette.lcdText,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            val xoText = if (config.crossover.bypass || config.activeBand == CrossoverBand.FULL) {
+                "XOVER $shortTag: BYP/FULL"
+            } else {
+                "XOVER $shortTag: ${xoBandCfg.frequencyHz.toInt()}Hz ${xoBandCfg.filterType.shortLabel}${xoBandCfg.slope.dbPerOct}"
+            }
+            Text(
+                text = "$xoText | EQ:${if (config.eqBypass) "BYP" else "ON"} LIM:${if (config.limiter.enabled) "${config.limiter.thresholdDbfs.toInt()}dB" else "BYP"}",
+                fontFamily = JetBrainsMonoFamily,
+                fontSize = 8.sp,
+                color = accentColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .padding(vertical = 2.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            meterContent()
-        }
-        Text(
-            text = String.format(Locale.US, "%+.1fdB", gainDb),
-            fontFamily = JetBrainsMonoFamily,
-            fontSize = 8.sp,
-            color = palette.lcdPrimary,
-            maxLines = 1
-        )
-        Text(
-            text = "${if (polInverted) "Ø-" else "Ø+"} ${String.format(Locale.US, "%.1fms", delayMs)}",
-            fontFamily = JetBrainsMonoFamily,
-            fontSize = 7.sp,
-            color = palette.lcdMutedText,
-            maxLines = 1
-        )
     }
 }

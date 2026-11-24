@@ -5,7 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [PresetEntity::class], version = 1, exportSchema = false)
+@Database(entities = [PresetEntity::class], version = 2, exportSchema = false)
 abstract class DlmsDatabase : RoomDatabase() {
     abstract fun presetDao(): PresetDao
 
@@ -19,7 +19,10 @@ abstract class DlmsDatabase : RoomDatabase() {
                     context.applicationContext,
                     DlmsDatabase::class.java,
                     "dlms_2way_local.db"
-                ).build().also { INSTANCE = it }
+                )
+                    .fallbackToDestructiveMigration(dropAllTables = true)
+                    .build()
+                    .also { INSTANCE = it }
             }
     }
 }
