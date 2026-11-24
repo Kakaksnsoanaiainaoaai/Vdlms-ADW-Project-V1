@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DLMS 2-Way</string>
+    <string name="hardware_model_title">DLMS-202X // 2-WAY DIGITAL LOUDSPEAKER MANAGEMENT</string>
+    <string name="youtube_routing_notice">YouTube playback uses the official embedded player. Due to Android &amp; YouTube DRM restrictions, YouTube audio routes directly to system audio output and is separated from the internal Mic/Line DSP chain.</string>
+    <string name="mic_permission_required">Microphone/Audio Input permission is required to capture live audio into the 2-way DSP engine.</string>
+    <string name="audio_not_connected">AUDIO: NOT CONNECTED</string>
+</resources>

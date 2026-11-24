@@ -1,0 +1,6 @@
+{
+  "name": "DLMS 2-Way",
+  "description": "Virtual 2-Way Digital Loudspeaker Management System (DLMS) hardware rack audio processor for Android with dual separated input/output DSP chains, 2-way crossover, parametric EQ, delay, limiter, presets, and embedded YouTube player.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
