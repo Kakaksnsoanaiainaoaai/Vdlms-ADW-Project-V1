@@ -9,15 +9,16 @@
   - **Input L & Input R**: Gain (`-24` s/d `+12 dB`), Polarity (`0° / 180°`), Mute, Delay (`0–50 ms` + konversi meter), Parametric EQ 5-Band dengan grafik respons frekuensi real-time, serta VU meter terpisah.
   - **Crossover 2-Way (LOW / HIGH)**: Filter **Butterworth** (`12 / 18 / 24 / 48 dB/oct`) dan **Linkwitz-Riley** (`12 / 24 / 48 dB/oct`), frekuensi `20 Hz – 20 kHz`, bypass per band/global, dan grafik respons frekuensi matematis.
   - **Output L & Output R**: Matrix routing (`IN L`, `IN R`, `L+R SUM`), band assignment (`LOW`, `HIGH`, `FULL`), Gain, Delay (`ms` & `meter`), Polarity, Mute, Parametric EQ 5-Band, dan Peak Limiter (`Threshold`, `Attack`, `Release`, `Make-up Gain`, indikator aktif + gain reduction meter).
-- **Audio Engine Native Low-Latency**
-  - Menggunakan `AudioRecord` + `DlmsDspProcessor` + `AudioTrack` (`PERFORMANCE_MODE_LOW_LATENCY` pada API 26+) dengan deteksi perangkat input/output dan sample rate aktual perangkat.
-  - Penanganan status nyata (`AUDIO: READY`, `AUDIO: NOT CONNECTED`, `AUDIO: PERMISSION DENIED`) tanpa status atau sinyal palsu.
+- **Audio Engine Multi-Source & Routing Nyata**
+  - **DEVICE INPUT**: Menggunakan `AudioRecord` + `DlmsDspProcessor` + `AudioTrack` (`PERFORMANCE_MODE_LOW_LATENCY` pada API 26+) dengan deteksi perangkat input/output dan sample rate aktual perangkat.
+  - **INTERNAL MEDIA**: Mendekode file audio lokal resmi (`OpenDocument` + `MediaExtractor` + `MediaCodec`) menjadi PCM stereo `IN L / IN R` untuk diproses langsung oleh DSP 2-Way DLMS secara real-time.
+  - **YOUTUBE**: Menampilkan status jujur `YOUTUBE AUDIO ROUTING: NOT AVAILABLE` karena player resmi YouTube tidak membuka stream PCM mentah akibat aturan YouTube & proteksi DRM (tanpa downloader, stream scraping, atau meter palsu).
 - **Kontrol Hardware Rack Virtual**
-  - Tombol fisik virtual (`MENU`, `BACK`, `ENTER`, D-Pad `UP/DOWN/LEFT/RIGHT`, `MUTE`, pemilih channel `IN L`, `IN R`, `X-OVER`, `OUT L`, `OUT R`, `YT`), LED indikator, serta **Rotary Encoder** virtual (`TURN` untuk navigasi/ubah nilai, `PUSH = ENTER`).
+  - Tombol fisik virtual (`MENU`, `BACK`, `ENTER`, D-Pad `UP/DOWN/LEFT/RIGHT`, `MUTE`, `SOURCE`, pemilih channel `IN L`, `IN R`, `X-OVER`, `OUT L`, `OUT R`, `YT`), LED indikator, serta **Rotary Encoder** virtual (`TURN` untuk navigasi/ubah nilai, `PUSH = ENTER`).
 - **Preset & Penyimpanan Lokal**
   - Save, Load, Rename, Delete, dan Reset ke preset netral `DEFAULT` menggunakan **Room Database** dan **DataStore Preferences**.
 - **Media / YouTube Terintegrasi**
-  - Terhubung langsung ke YouTube di dalam aplikasi (`m.youtube.com` & IFrame Player resmi) tanpa API key, tanpa downloader/ad-bypass, dengan pemisahan jalur audio sistem dari rantai DSP mikrofon internal.
+  - Terhubung langsung ke YouTube di dalam aplikasi (`m.youtube.com` & IFrame Player resmi) tanpa API key dan tetap mematuhi ketentuan resmi YouTube.
 
 ---
 

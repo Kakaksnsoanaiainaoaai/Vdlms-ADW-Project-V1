@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.audio.AudioEngineState
 import com.example.audio.AudioEngineStatus
+import com.example.audio.AudioRoutingStatus
+import com.example.audio.AudioSourceType
 import com.example.dsp.AudioTelemetry
 import com.example.dsp.DspState
 import com.example.hardware.DisplayPage
@@ -44,8 +46,11 @@ fun DisplayHomeScreen(
     telemetry: AudioTelemetry,
     audioState: AudioEngineState,
     meterStyle: MeterStyleOption,
+    onSelectSource: (AudioSourceType) -> Unit,
     onStartAudio: () -> Unit,
     onStopAudio: () -> Unit,
+    onPickInternalMedia: () -> Unit,
+    onToggleMediaPlayPause: () -> Unit,
     onOpenPage: (DisplayPage) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -226,51 +231,135 @@ fun DisplayHomeScreen(
             }
         }
 
-        // Real Audio Engine Status & Control Strip
-        Row(
+        // Audio Source Selector + Real Audio Routing Strip
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(4.dp))
-                .background(Color.Black.copy(alpha = 0.45f))
+                .background(Color.Black.copy(alpha = 0.48f))
                 .border(1.dp, palette.lcdGrid, RoundedCornerShape(4.dp))
                 .padding(horizontal = 8.dp, vertical = 5.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                val infoLine = when (audioState.status) {
-                    AudioEngineStatus.READY -> {
-                        val fb = if (audioState.isFeedbackRisk) " | Use headphones to avoid mic feedback" else ""
-                        "LIVE: ${audioState.activeInputDeviceName} -> ${audioState.activeOutputDeviceName}$fb"
-                    }
-                    AudioEngineStatus.NOT_CONNECTED ->
-                        "Engine stopped. Tap START AUDIO to route live 2-ch DSP."
-                    AudioEngineStatus.PERMISSION_REQUIRED, AudioEngineStatus.ERROR ->
-                        audioState.errorMessage ?: "Audio device unavailable."
-                    AudioEngineStatus.STARTING -> "Initializing native audio stream..."
-                }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
-                    text = infoLine,
+                    text = "SRC:",
                     fontFamily = JetBrainsMonoFamily,
                     fontSize = 9.sp,
-                    color = when (audioState.status) {
-                        AudioEngineStatus.READY -> if (audioState.isFeedbackRisk) palette.meterYellow else palette.meterGreen
-                        AudioEngineStatus.PERMISSION_REQUIRED, AudioEngineStatus.ERROR -> palette.meterRed
-                        else -> palette.lcdMutedText
-                    },
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    fontWeight = FontWeight.Bold,
+                    color = palette.lcdMutedText
                 )
+                AudioSourceType.entries.forEach { src ->
+                    val active = audioState.selectedSource == src
+                    val chipColor = if (src == AudioSourceType.YOUTUBE && active) palette.meterRed else palette.lcdPrimary
+                    LcdSmallActionButton(
+                        text = src.shortLabel,
+                        active = active,
+                        activeColor = chipColor,
+                        onClick = { onSelectSource(src) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("home_source_${src.shortLabel.lowercase()}")
+                    )
+                }
             }
-            Spacer(modifier = Modifier.width(8.dp))
-            val running = audioState.status == AudioEngineStatus.READY || audioState.status == AudioEngineStatus.STARTING
-            LcdSmallActionButton(
-                text = if (running) "STOP AUDIO" else "START AUDIO",
-                active = running,
-                activeColor = if (running) palette.meterRed else palette.meterGreen,
-                onClick = if (running) onStopAudio else onStartAudio,
-                modifier = Modifier.testTag("audio_engine_toggle_btn")
-            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    val routingActive = audioState.routingStatus == AudioRoutingStatus.ACTIVE
+                    val infoLine = when (audioState.selectedSource) {
+                        AudioSourceType.YOUTUBE ->
+                            "YOUTUBE AUDIO ROUTING: NOT AVAILABLE (DRM/ToS)"
+                        AudioSourceType.INTERNAL_MEDIA -> when {
+                            audioState.mediaState.isPlaying ->
+                                "SOURCE → DSP: ${audioState.mediaState.trackName}"
+                            audioState.mediaState.hasTrack ->
+                                "PAUSED: ${audioState.mediaState.trackName}"
+                            audioState.mediaState.errorMessage != null ->
+                                audioState.mediaState.errorMessage
+                            else -> "Pick a local audio file to route into DSP."
+                        }
+                        AudioSourceType.DEVICE_INPUT -> when (audioState.status) {
+                            AudioEngineStatus.READY -> {
+                                val fb = if (audioState.isFeedbackRisk) " | Use headphones" else ""
+                                "SOURCE → DSP: ${audioState.activeInputDeviceName}$fb"
+                            }
+                            AudioEngineStatus.NOT_CONNECTED ->
+                                "Device Input idle. Tap START AUDIO to route."
+                            AudioEngineStatus.PERMISSION_REQUIRED, AudioEngineStatus.ERROR ->
+                                audioState.errorMessage ?: "Audio device unavailable."
+                            AudioEngineStatus.STARTING -> "Initializing native audio stream..."
+                        }
+                    }
+                    Text(
+                        text = infoLine,
+                        fontFamily = JetBrainsMonoFamily,
+                        fontSize = 9.sp,
+                        fontWeight = if (audioState.selectedSource == AudioSourceType.YOUTUBE) FontWeight.Bold else FontWeight.Normal,
+                        color = when {
+                            audioState.selectedSource == AudioSourceType.YOUTUBE -> palette.meterRed
+                            routingActive -> if (audioState.isFeedbackRisk) palette.meterYellow else palette.meterGreen
+                            audioState.status == AudioEngineStatus.PERMISSION_REQUIRED ||
+                                audioState.status == AudioEngineStatus.ERROR -> palette.meterRed
+                            else -> palette.lcdMutedText
+                        },
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+                when (audioState.selectedSource) {
+                    AudioSourceType.DEVICE_INPUT -> {
+                        val running = audioState.status == AudioEngineStatus.READY ||
+                            audioState.status == AudioEngineStatus.STARTING
+                        LcdSmallActionButton(
+                            text = if (running) "STOP" else "START AUDIO",
+                            active = running,
+                            activeColor = if (running) palette.meterRed else palette.meterGreen,
+                            onClick = if (running) onStopAudio else onStartAudio,
+                            modifier = Modifier.testTag("audio_engine_toggle_btn")
+                        )
+                    }
+                    AudioSourceType.INTERNAL_MEDIA -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            LcdSmallActionButton(
+                                text = "FILE",
+                                active = !audioState.mediaState.hasTrack,
+                                activeColor = palette.lcdPrimary,
+                                onClick = onPickInternalMedia,
+                                modifier = Modifier.testTag("home_pick_media_btn")
+                            )
+                            if (audioState.mediaState.hasTrack) {
+                                val playing = audioState.mediaState.isPlaying
+                                LcdSmallActionButton(
+                                    text = if (playing) "PAUSE" else "PLAY",
+                                    active = playing,
+                                    activeColor = if (playing) palette.meterYellow else palette.meterGreen,
+                                    onClick = onToggleMediaPlayPause,
+                                    modifier = Modifier.testTag("home_media_play_btn")
+                                )
+                            }
+                        }
+                    }
+                    AudioSourceType.YOUTUBE -> {
+                        LcdSmallActionButton(
+                            text = "OPEN YT",
+                            active = true,
+                            activeColor = palette.lcdSecondary,
+                            onClick = { onOpenPage(DisplayPage.MEDIA_YOUTUBE) },
+                            modifier = Modifier.testTag("home_open_yt_btn")
+                        )
+                    }
+                }
+            }
         }
     }
 }

@@ -8,6 +8,7 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.net.Uri
 import android.os.Build
 import android.os.Process
 import android.util.Log
@@ -18,11 +19,16 @@ import com.example.dsp.DspState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Real-time low-latency Android AudioRecord -> DlmsDspProcessor -> AudioTrack engine.
- * Never generates synthetic/fake audio or fake READY status when hardware/permissions are absent.
+ * Unified DLMS 2-Way Audio Router supporting:
+ * 1. DEVICE_INPUT: Live AudioRecord (Mic / USB / Line) -> DlmsDspProcessor -> AudioTrack
+ * 2. INTERNAL_MEDIA: Local Audio File (MediaExtractor/MediaCodec) -> DlmsDspProcessor -> AudioTrack
+ * 3. YOUTUBE: Official YouTube Player (strictly checks legal/API PCM availability -> honestly reports UNAVAILABLE)
+ *
+ * Never generates fake/synthetic signals or claims ACTIVE routing when audio is not flowing into DSP.
  */
 class AndroidAudioEngine(
     private val context: Context,
@@ -31,6 +37,8 @@ class AndroidAudioEngine(
 ) {
     companion object {
         private const val TAG = "AndroidAudioEngine"
+        const val YOUTUBE_UNAVAILABLE_NOTICE =
+            "YOUTUBE AUDIO ROUTING: NOT AVAILABLE — Official YouTube embedded player/API does not expose raw PCM audio streams due to YouTube Terms & DRM protection."
     }
 
     private val _engineState = MutableStateFlow(AudioEngineState())
@@ -39,18 +47,142 @@ class AndroidAudioEngine(
     private val _telemetry = MutableStateFlow(AudioTelemetry())
     val telemetry: StateFlow<AudioTelemetry> = _telemetry.asStateFlow()
 
-    private val running = AtomicBoolean(false)
+    private val runningDeviceCapture = AtomicBoolean(false)
     private var workerThread: Thread? = null
     private var activeRecord: AudioRecord? = null
     private var activeTrack: AudioTrack? = null
+    @Volatile
+    private var latestDspState: DspState = DspState.neutralDefault()
+
+    private val mediaPlayer = InternalMediaAudioPlayer(
+        context = context,
+        dspProcessor = dspProcessor,
+        onTelemetry = { tel -> _telemetry.value = tel },
+        onMediaStateChanged = { mediaState ->
+            _engineState.update { state ->
+                val isMediaSource = state.selectedSource == AudioSourceType.INTERNAL_MEDIA
+                val active = isMediaSource && mediaState.isPlaying
+                state.copy(
+                    mediaState = mediaState,
+                    routingStatus = if (active) AudioRoutingStatus.ACTIVE else state.routingStatus,
+                    activeSampleRate = if (active) mediaState.sampleRate else state.activeSampleRate,
+                    hwInputChannels = if (active) mediaState.channels.coerceAtMost(2) else state.hwInputChannels
+                )
+            }
+        },
+        onRoutingChanged = { isActive, err ->
+            _engineState.update { state ->
+                if (state.selectedSource != AudioSourceType.INTERNAL_MEDIA) return@update state
+                state.copy(
+                    routingStatus = if (isActive) AudioRoutingStatus.ACTIVE else AudioRoutingStatus.UNAVAILABLE,
+                    status = when {
+                        isActive -> AudioEngineStatus.READY
+                        err != null -> AudioEngineStatus.ERROR
+                        else -> AudioEngineStatus.NOT_CONNECTED
+                    },
+                    statusLabel = when {
+                        isActive -> "AUDIO: READY"
+                        err != null -> "AUDIO: ERROR"
+                        else -> "AUDIO: NOT CONNECTED"
+                    },
+                    errorMessage = err
+                )
+            }
+        }
+    ).apply {
+        currentDspStateProvider = { latestDspState }
+    }
 
     fun hasRecordPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
 
     fun updateDspConfig(state: DspState) {
+        latestDspState = state
         val sr = _engineState.value.activeSampleRate.takeIf { it > 0 }?.toDouble() ?: 48000.0
         dspProcessor.updateConfig(state, sr)
+    }
+
+    fun selectSource(source: AudioSourceType) {
+        if (_engineState.value.selectedSource == source) return
+        stopAllSources()
+        when (source) {
+            AudioSourceType.DEVICE_INPUT -> {
+                _engineState.update {
+                    it.copy(
+                        selectedSource = AudioSourceType.DEVICE_INPUT,
+                        routingStatus = AudioRoutingStatus.UNAVAILABLE,
+                        status = AudioEngineStatus.NOT_CONNECTED,
+                        statusLabel = "AUDIO: NOT CONNECTED",
+                        youtubeRoutingNotice = null,
+                        errorMessage = null
+                    )
+                }
+            }
+            AudioSourceType.INTERNAL_MEDIA -> {
+                _engineState.update {
+                    it.copy(
+                        selectedSource = AudioSourceType.INTERNAL_MEDIA,
+                        routingStatus = AudioRoutingStatus.UNAVAILABLE,
+                        status = AudioEngineStatus.NOT_CONNECTED,
+                        statusLabel = "AUDIO: NOT CONNECTED",
+                        youtubeRoutingNotice = null,
+                        errorMessage = null
+                    )
+                }
+            }
+            AudioSourceType.YOUTUBE -> {
+                // Honest status: official YouTube player/API does not provide raw PCM audio to app DSP
+                _engineState.update {
+                    it.copy(
+                        selectedSource = AudioSourceType.YOUTUBE,
+                        routingStatus = AudioRoutingStatus.UNAVAILABLE,
+                        status = AudioEngineStatus.NOT_CONNECTED,
+                        statusLabel = "YOUTUBE AUDIO ROUTING: NOT AVAILABLE",
+                        youtubeRoutingNotice = YOUTUBE_UNAVAILABLE_NOTICE,
+                        errorMessage = null,
+                        isFeedbackRisk = false,
+                        activeSampleRate = 0,
+                        activeBufferFrames = 0,
+                        hwInputChannels = 0
+                    )
+                }
+                _telemetry.value = AudioTelemetry()
+            }
+        }
+    }
+
+    fun loadInternalMedia(uri: Uri, preferredOutputDeviceId: Int?, bufferMultiplier: Int) {
+        selectSource(AudioSourceType.INTERNAL_MEDIA)
+        mediaPlayer.setOutputConfig(
+            outputDevice = enumerator.findOutputDeviceInfo(preferredOutputDeviceId),
+            bufferMult = bufferMultiplier
+        )
+        val loaded = mediaPlayer.loadUri(uri)
+        if (loaded.hasTrack) {
+            mediaPlayer.play()
+        }
+    }
+
+    fun toggleInternalMediaPlayPause(preferredOutputDeviceId: Int?, bufferMultiplier: Int) {
+        if (_engineState.value.selectedSource != AudioSourceType.INTERNAL_MEDIA) {
+            selectSource(AudioSourceType.INTERNAL_MEDIA)
+        }
+        mediaPlayer.setOutputConfig(
+            outputDevice = enumerator.findOutputDeviceInfo(preferredOutputDeviceId),
+            bufferMult = bufferMultiplier
+        )
+        if (mediaPlayer.getState().isPlaying) {
+            mediaPlayer.pause()
+        } else {
+            mediaPlayer.play()
+        }
+    }
+
+    fun seekInternalMedia(posMs: Long) = mediaPlayer.seekTo(posMs)
+
+    fun toggleInternalMediaLoop() {
+        mediaPlayer.setLooping(!mediaPlayer.getState().looping)
     }
 
     fun start(
@@ -60,43 +192,83 @@ class AndroidAudioEngine(
         preferredOutputDeviceId: Int?,
         dspState: DspState
     ) {
-        if (running.get()) return
+        latestDspState = dspState
+        when (_engineState.value.selectedSource) {
+            AudioSourceType.YOUTUBE -> {
+                // Never pretend YouTube raw audio can be routed into internal DSP
+                _engineState.update {
+                    it.copy(
+                        routingStatus = AudioRoutingStatus.UNAVAILABLE,
+                        status = AudioEngineStatus.NOT_CONNECTED,
+                        statusLabel = "YOUTUBE AUDIO ROUTING: NOT AVAILABLE",
+                        youtubeRoutingNotice = YOUTUBE_UNAVAILABLE_NOTICE
+                    )
+                }
+                _telemetry.value = AudioTelemetry()
+                return
+            }
+            AudioSourceType.INTERNAL_MEDIA -> {
+                mediaPlayer.setOutputConfig(
+                    outputDevice = enumerator.findOutputDeviceInfo(preferredOutputDeviceId),
+                    bufferMult = bufferMultiplier
+                )
+                mediaPlayer.play()
+                return
+            }
+            AudioSourceType.DEVICE_INPUT -> startDeviceInput(
+                preferredSampleRate,
+                bufferMultiplier,
+                preferredInputDeviceId,
+                preferredOutputDeviceId,
+                dspState
+            )
+        }
+    }
+
+    private fun startDeviceInput(
+        preferredSampleRate: Int,
+        bufferMultiplier: Int,
+        preferredInputDeviceId: Int?,
+        preferredOutputDeviceId: Int?,
+        dspState: DspState
+    ) {
+        if (runningDeviceCapture.get()) return
+        mediaPlayer.stop()
 
         if (!hasRecordPermission()) {
-            _engineState.value = AudioEngineState(
-                status = AudioEngineStatus.PERMISSION_REQUIRED,
-                statusLabel = "AUDIO: PERMISSION DENIED",
-                errorMessage = "Microphone permission is required to capture live audio into the 2-way DSP engine."
-            )
+            _engineState.update {
+                it.copy(
+                    routingStatus = AudioRoutingStatus.UNAVAILABLE,
+                    status = AudioEngineStatus.PERMISSION_REQUIRED,
+                    statusLabel = "AUDIO: PERMISSION DENIED",
+                    errorMessage = "Microphone permission is required to capture live audio into the 2-way DSP engine."
+                )
+            }
             _telemetry.value = AudioTelemetry()
             return
         }
 
         val caps = enumerator.queryCapabilities()
-        if (caps.inputDevices.isEmpty()) {
-            _engineState.value = AudioEngineState(
-                status = AudioEngineStatus.ERROR,
-                statusLabel = "AUDIO: NOT CONNECTED",
-                errorMessage = "No audio input hardware device available on this Android device."
-            )
-            _telemetry.value = AudioTelemetry()
-            return
-        }
-        if (caps.outputDevices.isEmpty()) {
-            _engineState.value = AudioEngineState(
-                status = AudioEngineStatus.ERROR,
-                statusLabel = "AUDIO: NOT CONNECTED",
-                errorMessage = "No audio output hardware device available on this Android device."
-            )
+        if (caps.inputDevices.isEmpty() || caps.outputDevices.isEmpty()) {
+            _engineState.update {
+                it.copy(
+                    routingStatus = AudioRoutingStatus.UNAVAILABLE,
+                    status = AudioEngineStatus.ERROR,
+                    statusLabel = "AUDIO: NOT CONNECTED",
+                    errorMessage = "Required audio input or output hardware device not available."
+                )
+            }
             _telemetry.value = AudioTelemetry()
             return
         }
 
-        _engineState.value = _engineState.value.copy(
-            status = AudioEngineStatus.STARTING,
-            statusLabel = "AUDIO: STARTING...",
-            errorMessage = null
-        )
+        _engineState.update {
+            it.copy(
+                status = AudioEngineStatus.STARTING,
+                statusLabel = "AUDIO: STARTING...",
+                errorMessage = null
+            )
+        }
 
         val sampleRate = if (preferredSampleRate in caps.supportedSampleRates) {
             preferredSampleRate
@@ -106,7 +278,6 @@ class AndroidAudioEngine(
         val frameBlock = (caps.nativeFramesPerBuffer * bufferMultiplier.coerceIn(1, 8)).coerceIn(128, 4096)
 
         try {
-            // Probe Stereo Input first, fall back to Mono Input if device only supports 1-ch capture
             var hwChannels = 2
             var inChannelMask = AudioFormat.CHANNEL_IN_STEREO
             var minRecBytes = AudioRecord.getMinBufferSize(sampleRate, inChannelMask, AudioFormat.ENCODING_PCM_16BIT)
@@ -134,7 +305,6 @@ class AndroidAudioEngine(
 
             if (record.state != AudioRecord.STATE_INITIALIZED) {
                 record.release()
-                // Fallback retry in Mono if Stereo init failed on device
                 if (hwChannels == 2) {
                     hwChannels = 1
                     inChannelMask = AudioFormat.CHANNEL_IN_MONO
@@ -164,10 +334,7 @@ class AndroidAudioEngine(
             }
 
             val finalRecord = activeRecord!!
-            val inDeviceInfo = enumerator.findInputDeviceInfo(preferredInputDeviceId)
-            if (inDeviceInfo != null) {
-                finalRecord.setPreferredDevice(inDeviceInfo)
-            }
+            enumerator.findInputDeviceInfo(preferredInputDeviceId)?.let { finalRecord.setPreferredDevice(it) }
 
             val minTrkBytes = AudioTrack.getMinBufferSize(
                 sampleRate,
@@ -210,11 +377,7 @@ class AndroidAudioEngine(
                 throw IllegalStateException("AudioTrack failed to initialize output stream.")
             }
             activeTrack = track
-
-            val outDeviceInfo = enumerator.findOutputDeviceInfo(preferredOutputDeviceId)
-            if (outDeviceInfo != null) {
-                track.setPreferredDevice(outDeviceInfo)
-            }
+            enumerator.findOutputDeviceInfo(preferredOutputDeviceId)?.let { track.setPreferredDevice(it) }
 
             dspProcessor.resetAllStates()
             dspProcessor.updateConfig(dspState, sampleRate.toDouble())
@@ -222,28 +385,32 @@ class AndroidAudioEngine(
             finalRecord.startRecording()
             track.play()
 
-            val inName = inDeviceInfo?.let {
+            val inName = enumerator.findInputDeviceInfo(preferredInputDeviceId)?.let {
                 caps.inputDevices.firstOrNull { d -> d.id == it.id }?.name
             } ?: caps.inputDevices.firstOrNull()?.name ?: "Default Input"
 
-            val outName = outDeviceInfo?.let {
+            val outName = enumerator.findOutputDeviceInfo(preferredOutputDeviceId)?.let {
                 caps.outputDevices.firstOrNull { d -> d.id == it.id }?.name
             } ?: caps.outputDevices.firstOrNull()?.name ?: "Default Output"
 
             val feedbackRisk = !enumerator.isHeadsetOrExternalOutput(preferredOutputDeviceId)
 
-            running.set(true)
-            _engineState.value = AudioEngineState(
-                status = AudioEngineStatus.READY,
-                statusLabel = "AUDIO: READY",
-                errorMessage = null,
-                isFeedbackRisk = feedbackRisk,
-                activeSampleRate = sampleRate,
-                activeBufferFrames = frameBlock,
-                activeInputDeviceName = inName,
-                activeOutputDeviceName = outName,
-                hwInputChannels = hwChannels
-            )
+            runningDeviceCapture.set(true)
+            _engineState.update {
+                it.copy(
+                    selectedSource = AudioSourceType.DEVICE_INPUT,
+                    routingStatus = AudioRoutingStatus.ACTIVE,
+                    status = AudioEngineStatus.READY,
+                    statusLabel = "AUDIO: READY",
+                    errorMessage = null,
+                    isFeedbackRisk = feedbackRisk,
+                    activeSampleRate = sampleRate,
+                    activeBufferFrames = frameBlock,
+                    activeInputDeviceName = inName,
+                    activeOutputDeviceName = outName,
+                    hwInputChannels = hwChannels
+                )
+            }
 
             val captureChannels = hwChannels
             val thread = Thread({
@@ -256,7 +423,7 @@ class AndroidAudioEngine(
                 val outR = FloatArray(frameBlock)
 
                 try {
-                    while (running.get()) {
+                    while (runningDeviceCapture.get()) {
                         val readSamples = finalRecord.read(shortIn, 0, shortIn.size)
                         if (readSamples < 0) {
                             throw IllegalStateException("AudioRecord read error code: $readSamples")
@@ -281,10 +448,8 @@ class AndroidAudioEngine(
                         _telemetry.value = tel
 
                         for (i in 0 until framesRead) {
-                            val l = (outL[i].coerceIn(-1f, 1f) * 32767f).toInt().toShort()
-                            val r = (outR[i].coerceIn(-1f, 1f) * 32767f).toInt().toShort()
-                            shortOut[i * 2] = l
-                            shortOut[i * 2 + 1] = r
+                            shortOut[i * 2] = (outL[i].coerceIn(-1f, 1f) * 32767f).toInt().toShort()
+                            shortOut[i * 2 + 1] = (outR[i].coerceIn(-1f, 1f) * 32767f).toInt().toShort()
                         }
                         val written = track.write(shortOut, 0, framesRead * 2)
                         if (written < 0) {
@@ -292,14 +457,17 @@ class AndroidAudioEngine(
                         }
                     }
                 } catch (e: Exception) {
-                    if (running.get()) {
+                    if (runningDeviceCapture.get()) {
                         Log.e(TAG, "Audio processing loop error", e)
-                        running.set(false)
-                        _engineState.value = AudioEngineState(
-                            status = AudioEngineStatus.ERROR,
-                            statusLabel = "AUDIO: ENGINE ERROR",
-                            errorMessage = e.localizedMessage ?: "Audio engine stopped unexpectedly."
-                        )
+                        runningDeviceCapture.set(false)
+                        _engineState.update {
+                            it.copy(
+                                routingStatus = AudioRoutingStatus.UNAVAILABLE,
+                                status = AudioEngineStatus.ERROR,
+                                statusLabel = "AUDIO: ENGINE ERROR",
+                                errorMessage = e.localizedMessage ?: "Audio engine stopped unexpectedly."
+                            )
+                        }
                         _telemetry.value = AudioTelemetry()
                     }
                 }
@@ -308,58 +476,63 @@ class AndroidAudioEngine(
             thread.start()
         } catch (se: SecurityException) {
             Log.e(TAG, "SecurityException starting audio engine", se)
-            stopInternal()
-            _engineState.value = AudioEngineState(
-                status = AudioEngineStatus.PERMISSION_REQUIRED,
-                statusLabel = "AUDIO: PERMISSION DENIED",
-                errorMessage = "Microphone permission denied by system."
-            )
+            stopDeviceInternal()
+            _engineState.update {
+                it.copy(
+                    routingStatus = AudioRoutingStatus.UNAVAILABLE,
+                    status = AudioEngineStatus.PERMISSION_REQUIRED,
+                    statusLabel = "AUDIO: PERMISSION DENIED",
+                    errorMessage = "Microphone permission denied by system."
+                )
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start audio engine", e)
-            stopInternal()
-            _engineState.value = AudioEngineState(
-                status = AudioEngineStatus.ERROR,
-                statusLabel = "AUDIO: NOT CONNECTED",
-                errorMessage = e.localizedMessage ?: "Audio engine failed to start."
-            )
+            stopDeviceInternal()
+            _engineState.update {
+                it.copy(
+                    routingStatus = AudioRoutingStatus.UNAVAILABLE,
+                    status = AudioEngineStatus.ERROR,
+                    statusLabel = "AUDIO: NOT CONNECTED",
+                    errorMessage = e.localizedMessage ?: "Audio engine failed to start."
+                )
+            }
         }
     }
 
     fun stop() {
-        stopInternal()
-        _engineState.value = AudioEngineState(
-            status = AudioEngineStatus.NOT_CONNECTED,
-            statusLabel = "AUDIO: NOT CONNECTED",
-            errorMessage = null
-        )
+        stopAllSources()
+        _engineState.update {
+            it.copy(
+                routingStatus = AudioRoutingStatus.UNAVAILABLE,
+                status = AudioEngineStatus.NOT_CONNECTED,
+                statusLabel = if (it.selectedSource == AudioSourceType.YOUTUBE) {
+                    "YOUTUBE AUDIO ROUTING: NOT AVAILABLE"
+                } else {
+                    "AUDIO: NOT CONNECTED"
+                },
+                errorMessage = null
+            )
+        }
         _telemetry.value = AudioTelemetry()
     }
 
-    private fun stopInternal() {
-        running.set(false)
-        try {
-            activeRecord?.stop()
-        } catch (_: Exception) {
-        }
+    private fun stopAllSources() {
+        stopDeviceInternal()
+        mediaPlayer.stop()
+    }
+
+    private fun stopDeviceInternal() {
+        runningDeviceCapture.set(false)
+        try { activeRecord?.stop() } catch (_: Exception) {}
         try {
             activeTrack?.pause()
             activeTrack?.flush()
             activeTrack?.stop()
-        } catch (_: Exception) {
-        }
-        try {
-            workerThread?.join(400)
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
+        try { workerThread?.join(400) } catch (_: Exception) {}
         workerThread = null
-        try {
-            activeRecord?.release()
-        } catch (_: Exception) {
-        }
-        try {
-            activeTrack?.release()
-        } catch (_: Exception) {
-        }
+        try { activeRecord?.release() } catch (_: Exception) {}
+        try { activeTrack?.release() } catch (_: Exception) {}
         activeRecord = null
         activeTrack = null
         dspProcessor.resetAllStates()

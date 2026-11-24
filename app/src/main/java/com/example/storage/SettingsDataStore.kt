@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.audio.AudioSourceType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -37,6 +38,7 @@ data class SettingsState(
     val displayBrightness: Float = 1.0f,
     val displayTimeout: DisplayTimeoutOption = DisplayTimeoutOption.NEVER,
     val meterStyle: MeterStyleOption = MeterStyleOption.LED_SEGMENTED,
+    val selectedAudioSource: AudioSourceType = AudioSourceType.DEVICE_INPUT,
     val inputDeviceId: Int? = null,
     val outputDeviceId: Int? = null,
     val sampleRate: Int = 48000,
@@ -51,6 +53,7 @@ class SettingsDataStore(private val context: Context) {
         val BRIGHTNESS = floatPreferencesKey("brightness")
         val TIMEOUT = stringPreferencesKey("timeout")
         val METER_STYLE = stringPreferencesKey("meter_style")
+        val AUDIO_SOURCE = stringPreferencesKey("audio_source")
         val INPUT_DEVICE_ID = intPreferencesKey("input_device_id")
         val OUTPUT_DEVICE_ID = intPreferencesKey("output_device_id")
         val SAMPLE_RATE = intPreferencesKey("sample_rate")
@@ -68,6 +71,8 @@ class SettingsDataStore(private val context: Context) {
                 ?: DisplayTimeoutOption.NEVER,
             meterStyle = prefs[Keys.METER_STYLE]?.let { runCatching { MeterStyleOption.valueOf(it) }.getOrNull() }
                 ?: MeterStyleOption.LED_SEGMENTED,
+            selectedAudioSource = prefs[Keys.AUDIO_SOURCE]?.let { runCatching { AudioSourceType.valueOf(it) }.getOrNull() }
+                ?: AudioSourceType.DEVICE_INPUT,
             inputDeviceId = prefs[Keys.INPUT_DEVICE_ID]?.takeIf { it >= 0 },
             outputDeviceId = prefs[Keys.OUTPUT_DEVICE_ID]?.takeIf { it >= 0 },
             sampleRate = prefs[Keys.SAMPLE_RATE] ?: 48000,
@@ -91,6 +96,10 @@ class SettingsDataStore(private val context: Context) {
 
     suspend fun updateMeterStyle(style: MeterStyleOption) {
         context.dlmsDataStore.edit { it[Keys.METER_STYLE] = style.name }
+    }
+
+    suspend fun updateAudioSource(source: AudioSourceType) {
+        context.dlmsDataStore.edit { it[Keys.AUDIO_SOURCE] = source.name }
     }
 
     suspend fun updateInputDeviceId(deviceId: Int?) {

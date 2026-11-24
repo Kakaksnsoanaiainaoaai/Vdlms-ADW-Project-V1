@@ -31,24 +31,30 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.audio.AudioEngineState
 import com.example.audio.AudioEngineStatus
+import com.example.audio.AudioRoutingStatus
+import com.example.audio.AudioSourceType
 import com.example.ui.theme.JetBrainsMonoFamily
 import com.example.ui.theme.LocalDlmsPalette
 
 @Composable
 fun LcdSystemStatusBar(
     dspEnabled: Boolean,
+    crossoverBypass: Boolean,
     audioState: AudioEngineState,
     activePresetName: String,
     pageTitle: String,
     onToggleDsp: () -> Unit,
+    onOpenAudioSource: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val palette = LocalDlmsPalette.current
-    val audioColor = when (audioState.status) {
-        AudioEngineStatus.READY -> palette.meterGreen
-        AudioEngineStatus.STARTING -> palette.meterYellow
-        AudioEngineStatus.PERMISSION_REQUIRED, AudioEngineStatus.ERROR -> palette.meterRed
-        AudioEngineStatus.NOT_CONNECTED -> palette.lcdMutedText
+    val routingActive = audioState.routingStatus == AudioRoutingStatus.ACTIVE
+    val routingColor = when {
+        routingActive -> palette.meterGreen
+        audioState.selectedSource == AudioSourceType.YOUTUBE -> palette.meterRed
+        audioState.status == AudioEngineStatus.STARTING -> palette.meterYellow
+        audioState.status == AudioEngineStatus.PERMISSION_REQUIRED || audioState.status == AudioEngineStatus.ERROR -> palette.meterRed
+        else -> palette.lcdMutedText
     }
 
     Column(
@@ -65,39 +71,32 @@ fun LcdSystemStatusBar(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
                 modifier = Modifier.weight(1f)
             ) {
+                StatusPill(
+                    text = "SRC:${audioState.selectedSource.shortLabel}",
+                    color = if (audioState.selectedSource == AudioSourceType.YOUTUBE) palette.meterRed else palette.lcdSecondary,
+                    onClick = onOpenAudioSource
+                )
                 StatusPill(
                     text = if (dspEnabled) "DSP:ON" else "DSP:BYP",
                     color = if (dspEnabled) palette.lcdPrimary else palette.meterYellow,
                     onClick = onToggleDsp
                 )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(audioColor)
-                    )
-                    Text(
-                        text = audioState.statusLabel,
-                        fontFamily = JetBrainsMonoFamily,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = audioColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                Text(
+                    text = if (crossoverBypass) "2-WAY:BYP" else "2-WAY:ON",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (crossoverBypass) palette.meterYellow else palette.meterGreen,
+                    maxLines = 1
+                )
             }
             Text(
                 text = "IN:2 OUT:2 | $activePresetName",
                 fontFamily = JetBrainsMonoFamily,
-                fontSize = 9.sp,
+                fontSize = 8.sp,
                 color = palette.lcdSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -116,15 +115,28 @@ fun LcdSystemStatusBar(
                 fontWeight = FontWeight.Bold,
                 color = palette.lcdPrimary,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
             )
-            if (audioState.status == AudioEngineStatus.READY) {
-                val hwNote = if (audioState.hwInputChannels == 1) "1CH->L/R" else "2CH"
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(routingColor)
+                )
+                val srTag = if (routingActive && audioState.activeSampleRate > 0) {
+                    " (${audioState.activeSampleRate / 1000}k)"
+                } else ""
                 Text(
-                    text = "${audioState.activeSampleRate / 1000}kHz/${audioState.activeBufferFrames}f ($hwNote)",
+                    text = audioState.routingStatus.label + srTag,
                     fontFamily = JetBrainsMonoFamily,
-                    fontSize = 9.sp,
-                    color = palette.lcdMutedText,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = routingColor,
                     maxLines = 1
                 )
             }

@@ -1,5 +1,8 @@
 package com.example
 
+import com.example.audio.AudioEngineState
+import com.example.audio.AudioRoutingStatus
+import com.example.audio.AudioSourceType
 import com.example.dsp.BiquadFilter
 import com.example.dsp.CrossoverBand
 import com.example.dsp.CrossoverFilterBank
@@ -124,5 +127,14 @@ class DspProcessorTest {
         assertEquals("dQw4w9WgXcQ", YouTubeUrlParser.extractVideoId("https://youtu.be/dQw4w9WgXcQ?si=abc"))
         assertEquals("dQw4w9WgXcQ", YouTubeUrlParser.extractVideoId("dQw4w9WgXcQ"))
         assertEquals(null, YouTubeUrlParser.extractVideoId("subwoofer crossover test"))
+    }
+
+    @Test
+    fun defaultAudioEngineStateStartsHonestAndUnavailable() {
+        val defaultState = AudioEngineState()
+        assertEquals(AudioSourceType.DEVICE_INPUT, defaultState.selectedSource)
+        assertEquals(AudioRoutingStatus.UNAVAILABLE, defaultState.routingStatus)
+        assertEquals("AUDIO ROUTING: UNAVAILABLE", defaultState.routingStatus.label)
+        assertEquals(3, AudioSourceType.entries.size)
     }
 }

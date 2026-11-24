@@ -3,6 +3,7 @@ package com.example.hardware
 enum class DisplayPage(val title: String) {
     HOME("HOME // SYSTEM OVERVIEW"),
     MENU("MAIN MENU"),
+    AUDIO_SOURCE("AUDIO SOURCE // ROUTING"),
     INPUT_L("INPUT L // CH-A DSP"),
     INPUT_R("INPUT R // CH-B DSP"),
     CROSSOVER("CROSSOVER // 2-WAY"),
@@ -22,6 +23,7 @@ enum class HardwareKey {
     LEFT,
     RIGHT,
     MUTE,
+    QUICK_SOURCE,
     QUICK_IN_L,
     QUICK_IN_R,
     QUICK_XOVER,
@@ -56,6 +58,7 @@ data class MenuEntry(
 )
 
 val mainMenuEntries = listOf(
+    MenuEntry("AUDIO SOURCE", "Select DEVICE INPUT, INTERNAL MEDIA, or YOUTUBE", DisplayPage.AUDIO_SOURCE),
     MenuEntry("INPUT L", "Gain, Polarity, Mute, Delay, 5-Band EQ", DisplayPage.INPUT_L),
     MenuEntry("INPUT R", "Gain, Polarity, Mute, Delay, 5-Band EQ", DisplayPage.INPUT_R),
     MenuEntry("CROSSOVER 2-WAY", "LOW / HIGH Filters, Type, Slope, Graph", DisplayPage.CROSSOVER),

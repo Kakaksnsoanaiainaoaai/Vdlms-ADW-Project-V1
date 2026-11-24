@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
@@ -54,7 +56,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.audio.AudioEngineState
-import com.example.audio.AudioEngineStatus
+import com.example.audio.AudioRoutingStatus
+import com.example.audio.AudioSourceType
 import com.example.dsp.AudioTelemetry
 import com.example.dsp.DspState
 import com.example.hardware.DisplayPage
@@ -66,6 +69,7 @@ import com.example.ui.components.HardwareRoundDirectionKey
 import com.example.ui.components.HardwareStatusLed
 import com.example.ui.components.RackMountingEar
 import com.example.ui.components.RotaryEncoderKnob
+import com.example.ui.screens.DisplayAudioSourceScreen
 import com.example.ui.screens.DisplayCrossoverScreen
 import com.example.ui.screens.DisplayHomeScreen
 import com.example.ui.screens.DisplayInputScreen
@@ -106,16 +110,39 @@ fun DlmsRackScreen(viewModel: DlmsViewModel) {
         }
     }
 
-    val startAudioWithPermission: () -> Unit = {
-        val granted = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
-        if (granted) {
-            viewModel.startAudioEngine()
-        } else {
-            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    val pickAudioLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (_: Exception) {
+            }
+            viewModel.onInternalMediaFilePicked(uri)
         }
+    }
+
+    val startAudioWithPermission: () -> Unit = {
+        if (audioState.selectedSource == AudioSourceType.DEVICE_INPUT) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (granted) {
+                viewModel.startAudioEngine()
+            } else {
+                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        } else {
+            viewModel.startAudioEngine()
+        }
+    }
+
+    val pickInternalMedia: () -> Unit = {
+        pickAudioLauncher.launch(arrayOf("audio/*"))
     }
 
     BackHandler(enabled = hwState.currentPage != DisplayPage.HOME || hwState.isEditingParam) {
@@ -164,7 +191,8 @@ fun DlmsRackScreen(viewModel: DlmsViewModel) {
                             presets = presets,
                             activePresetName = activePresetName,
                             youtubeState = youtubeState,
-                            onStartAudio = startAudioWithPermission
+                            onStartAudio = startAudioWithPermission,
+                            onPickInternalMedia = pickInternalMedia
                         )
                     }
                 )
@@ -187,7 +215,8 @@ fun DlmsRackScreen(viewModel: DlmsViewModel) {
                             presets = presets,
                             activePresetName = activePresetName,
                             youtubeState = youtubeState,
-                            onStartAudio = startAudioWithPermission
+                            onStartAudio = startAudioWithPermission,
+                            onPickInternalMedia = pickInternalMedia
                         )
                     }
                 )
@@ -266,10 +295,14 @@ private fun LandscapeRackLayout(
                         .padding(5.dp),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text = "CH SELECT",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = palette.silkscreenText.copy(alpha = 0.7f)
+                    HardwarePushButton(
+                        label = "SOURCE",
+                        icon = Icons.Default.GraphicEq,
+                        isActive = hwState.currentPage == DisplayPage.AUDIO_SOURCE,
+                        ledColor = if (audioState.routingStatus == AudioRoutingStatus.ACTIVE) palette.meterGreen else palette.lcdSecondary,
+                        onClick = { viewModel.onHardwareKey(HardwareKey.QUICK_SOURCE) },
+                        compact = true,
+                        modifier = Modifier.fillMaxWidth()
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -574,7 +607,16 @@ private fun PortraitRackLayout(
                             modifier = Modifier.weight(1f)
                         )
                         HardwarePushButton(
-                            label = "MEDIA",
+                            label = "SRC",
+                            icon = Icons.Default.GraphicEq,
+                            isActive = hwState.currentPage == DisplayPage.AUDIO_SOURCE,
+                            ledColor = if (audioState.routingStatus == AudioRoutingStatus.ACTIVE) palette.meterGreen else palette.lcdSecondary,
+                            onClick = { viewModel.onHardwareKey(HardwareKey.QUICK_SOURCE) },
+                            compact = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        HardwarePushButton(
+                            label = "YT",
                             icon = Icons.Default.PlayCircle,
                             isActive = hwState.currentPage == DisplayPage.MEDIA_YOUTUBE,
                             ledColor = palette.lcdSecondary,
@@ -694,7 +736,7 @@ private fun ChassisTopSilkscreen(
             )
             HardwareStatusLed(
                 label = "AUD",
-                isLit = audioState.status == AudioEngineStatus.READY,
+                isLit = audioState.routingStatus == AudioRoutingStatus.ACTIVE,
                 litColor = palette.meterGreen
             )
             HardwareStatusLed(
@@ -733,7 +775,8 @@ private fun DisplayViewport(
     presets: List<com.example.storage.DlmsPreset>,
     activePresetName: String,
     youtubeState: com.example.youtube.YouTubeUiState,
-    onStartAudio: () -> Unit
+    onStartAudio: () -> Unit,
+    onPickInternalMedia: () -> Unit
 ) {
     HardwareLcdBezel(
         brightness = settings.displayBrightness,
@@ -743,10 +786,12 @@ private fun DisplayViewport(
         Column(modifier = Modifier.fillMaxSize()) {
             LcdSystemStatusBar(
                 dspEnabled = dspState.dspEnabled,
+                crossoverBypass = dspState.crossover.bypass,
                 audioState = audioState,
                 activePresetName = activePresetName,
                 pageTitle = hwState.currentPage.title,
-                onToggleDsp = { viewModel.toggleMasterDsp() }
+                onToggleDsp = { viewModel.toggleMasterDsp() },
+                onOpenAudioSource = { viewModel.navigateTo(DisplayPage.AUDIO_SOURCE) }
             )
 
             Box(
@@ -760,8 +805,11 @@ private fun DisplayViewport(
                         telemetry = telemetry,
                         audioState = audioState,
                         meterStyle = settings.meterStyle,
+                        onSelectSource = { viewModel.selectAudioSource(it) },
                         onStartAudio = onStartAudio,
                         onStopAudio = { viewModel.stopAudioEngine() },
+                        onPickInternalMedia = onPickInternalMedia,
+                        onToggleMediaPlayPause = { viewModel.toggleInternalMediaPlayPause() },
                         onOpenPage = { viewModel.navigateTo(it) }
                     )
 
@@ -770,12 +818,30 @@ private fun DisplayViewport(
                         onSelectEntry = { viewModel.navigateTo(it) }
                     )
 
+                    DisplayPage.AUDIO_SOURCE -> DisplayAudioSourceScreen(
+                        audioState = audioState,
+                        capabilities = capabilities,
+                        onSelectSource = { viewModel.selectAudioSource(it) },
+                        onStartDeviceAudio = onStartAudio,
+                        onStopAudio = { viewModel.stopAudioEngine() },
+                        onPickInternalMediaFile = onPickInternalMedia,
+                        onToggleMediaPlayPause = { viewModel.toggleInternalMediaPlayPause() },
+                        onSeekMedia = { viewModel.seekInternalMedia(it) },
+                        onToggleMediaLoop = { viewModel.toggleInternalMediaLoop() },
+                        onOpenYouTubePlayer = { viewModel.navigateTo(DisplayPage.MEDIA_YOUTUBE) }
+                    )
+
                     DisplayPage.INPUT_L -> DisplayInputScreen(
                         channelLabel = "INPUT L",
                         config = dspState.inputL,
-                        telemetry = telemetry.inputL,
+                        inputLTelemetry = telemetry.inputL,
+                        inputRTelemetry = telemetry.inputR,
+                        inputLMuted = dspState.inputL.muted,
+                        inputRMuted = dspState.inputR.muted,
+                        audioState = audioState,
                         hwState = hwState,
                         meterStyle = settings.meterStyle,
+                        onOpenAudioSource = { viewModel.navigateTo(DisplayPage.AUDIO_SOURCE) },
                         onSelectSubTab = { viewModel.setInputSubTab(it) },
                         onFocusParam = { viewModel.selectAndEditParameter(it) },
                         onUpdateConfig = { viewModel.updateInputL(it) },
@@ -788,9 +854,14 @@ private fun DisplayViewport(
                     DisplayPage.INPUT_R -> DisplayInputScreen(
                         channelLabel = "INPUT R",
                         config = dspState.inputR,
-                        telemetry = telemetry.inputR,
+                        inputLTelemetry = telemetry.inputL,
+                        inputRTelemetry = telemetry.inputR,
+                        inputLMuted = dspState.inputL.muted,
+                        inputRMuted = dspState.inputR.muted,
+                        audioState = audioState,
                         hwState = hwState,
                         meterStyle = settings.meterStyle,
+                        onOpenAudioSource = { viewModel.navigateTo(DisplayPage.AUDIO_SOURCE) },
                         onSelectSubTab = { viewModel.setInputSubTab(it) },
                         onFocusParam = { viewModel.selectAndEditParameter(it) },
                         onUpdateConfig = { viewModel.updateInputR(it) },

@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,10 +11,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.audio.AudioEngineState
+import com.example.audio.AudioRoutingStatus
+import com.example.audio.AudioSourceType
 import com.example.dsp.ChannelTelemetry
 import com.example.dsp.DspUnits
 import com.example.dsp.EqBandConfig
@@ -23,17 +36,23 @@ import com.example.hardware.InputSubTab
 import com.example.storage.MeterStyleOption
 import com.example.ui.components.HorizontalVuMeter
 import com.example.ui.components.ParametricEqGraph
-import kotlin.math.pow
+import com.example.ui.theme.JetBrainsMonoFamily
 import com.example.ui.theme.LocalDlmsPalette
 import java.util.Locale
+import kotlin.math.pow
 
 @Composable
 fun DisplayInputScreen(
     channelLabel: String,
     config: InputChannelConfig,
-    telemetry: ChannelTelemetry,
+    inputLTelemetry: ChannelTelemetry,
+    inputRTelemetry: ChannelTelemetry,
+    inputLMuted: Boolean,
+    inputRMuted: Boolean,
+    audioState: AudioEngineState,
     hwState: HardwareUiState,
     meterStyle: MeterStyleOption,
+    onOpenAudioSource: () -> Unit,
     onSelectSubTab: (InputSubTab) -> Unit,
     onFocusParam: (Int) -> Unit,
     onUpdateConfig: ((InputChannelConfig) -> InputChannelConfig) -> Unit,
@@ -45,6 +64,7 @@ fun DisplayInputScreen(
 ) {
     val palette = LocalDlmsPalette.current
     val scroll = rememberScrollState()
+    val isRoutingActive = audioState.routingStatus == AudioRoutingStatus.ACTIVE
 
     Column(
         modifier = modifier
@@ -53,12 +73,77 @@ fun DisplayInputScreen(
             .verticalScroll(scroll),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        HorizontalVuMeter(
-            label = "$channelLabel METER",
-            telemetry = telemetry,
-            meterStyle = meterStyle,
-            isMuted = config.muted
-        )
+        // Audio Source + Routing Chain Header
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color.Black.copy(alpha = 0.42f))
+                .border(
+                    1.dp,
+                    if (isRoutingActive) palette.meterGreen.copy(alpha = 0.65f)
+                    else if (audioState.selectedSource == AudioSourceType.YOUTUBE) palette.meterRed.copy(alpha = 0.65f)
+                    else palette.lcdGrid,
+                    RoundedCornerShape(4.dp)
+                )
+                .clickable(onClick = onOpenAudioSource)
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "SOURCE: ${audioState.selectedSource.displayName}",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.lcdPrimary
+                )
+                Text(
+                    text = if (isRoutingActive) "SOURCE → DSP [ACTIVE]" else "SOURCE → DSP [UNAVAILABLE]",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isRoutingActive) palette.meterGreen else palette.meterRed
+                )
+            }
+            if (audioState.selectedSource == AudioSourceType.YOUTUBE) {
+                Text(
+                    text = "YOUTUBE AUDIO ROUTING: NOT AVAILABLE",
+                    fontFamily = JetBrainsMonoFamily,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.meterRed
+                )
+            }
+        }
+
+        // Separated INPUT L & INPUT R Real-Time Meters
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color.Black.copy(alpha = 0.35f))
+                .border(1.dp, palette.lcdGrid, RoundedCornerShape(4.dp))
+                .padding(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            HorizontalVuMeter(
+                label = if (channelLabel == "INPUT L") "INPUT L (ACTIVE)" else "INPUT L",
+                telemetry = inputLTelemetry,
+                meterStyle = meterStyle,
+                isMuted = inputLMuted
+            )
+            HorizontalVuMeter(
+                label = if (channelLabel == "INPUT R") "INPUT R (ACTIVE)" else "INPUT R",
+                telemetry = inputRTelemetry,
+                meterStyle = meterStyle,
+                isMuted = inputRMuted
+            )
+        }
 
         LcdSubTabRow(
             tabs = InputSubTab.entries.map { it.label },

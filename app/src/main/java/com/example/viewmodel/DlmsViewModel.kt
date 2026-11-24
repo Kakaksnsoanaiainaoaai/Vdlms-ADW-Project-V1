@@ -4,11 +4,13 @@ import android.app.Application
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.DlmsApplication
 import com.example.audio.AudioEngineState
 import com.example.audio.AudioHardwareCapabilities
+import com.example.audio.AudioSourceType
 import com.example.dsp.AudioTelemetry
 import com.example.dsp.CrossoverBand
 import com.example.dsp.CrossoverBandConfig
@@ -97,6 +99,7 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
             val restoredState = savedSettings.lastDspJson?.let { presetRepo.decodeState(it) }
                 ?: DspState.neutralDefault()
             _dspState.value = restoredState
+            audioEngine.selectSource(savedSettings.selectedAudioSource)
             audioEngine.updateDspConfig(restoredState)
             refreshAudioCapabilities()
         }
@@ -138,6 +141,51 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshAudioCapabilities() {
         _capabilities.value = audioEnumerator.queryCapabilities()
+    }
+
+    fun selectAudioSource(source: AudioSourceType) {
+        registerInteraction()
+        viewModelScope.launch {
+            settingsStore.updateAudioSource(source)
+        }
+        audioEngine.selectSource(source)
+        if (source == AudioSourceType.YOUTUBE) {
+            _statusBannerMessage.value = "YOUTUBE AUDIO ROUTING: NOT AVAILABLE"
+        } else {
+            _statusBannerMessage.value = "SOURCE: ${source.displayName}"
+        }
+    }
+
+    fun onInternalMediaFilePicked(uri: Uri) {
+        registerInteraction()
+        viewModelScope.launch {
+            settingsStore.updateAudioSource(AudioSourceType.INTERNAL_MEDIA)
+        }
+        val s = settingsState.value
+        audioEngine.loadInternalMedia(
+            uri = uri,
+            preferredOutputDeviceId = s.outputDeviceId,
+            bufferMultiplier = s.bufferMultiplier
+        )
+    }
+
+    fun toggleInternalMediaPlayPause() {
+        registerInteraction()
+        val s = settingsState.value
+        audioEngine.toggleInternalMediaPlayPause(
+            preferredOutputDeviceId = s.outputDeviceId,
+            bufferMultiplier = s.bufferMultiplier
+        )
+    }
+
+    fun seekInternalMedia(posMs: Long) {
+        registerInteraction()
+        audioEngine.seekInternalMedia(posMs)
+    }
+
+    fun toggleInternalMediaLoop() {
+        registerInteraction()
+        audioEngine.toggleInternalMediaLoop()
     }
 
     fun startAudioEngine() {
@@ -219,6 +267,7 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             HardwareKey.BACK -> navigateBack()
+            HardwareKey.QUICK_SOURCE -> navigateTo(DisplayPage.AUDIO_SOURCE)
             HardwareKey.QUICK_IN_L -> navigateTo(DisplayPage.INPUT_L)
             HardwareKey.QUICK_IN_R -> navigateTo(DisplayPage.INPUT_R)
             HardwareKey.QUICK_XOVER -> navigateTo(DisplayPage.CROSSOVER)
@@ -753,6 +802,7 @@ class DlmsViewModel(application: Application) : AndroidViewModel(application) {
     fun resetApplication() {
         viewModelScope.launch {
             audioEngine.stop()
+            audioEngine.selectSource(AudioSourceType.DEVICE_INPUT)
             presetRepo.resetAllUserPresets()
             settingsStore.resetAll()
             val neutral = DspState.neutralDefault()
